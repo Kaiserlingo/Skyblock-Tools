@@ -32,19 +32,36 @@ const LS = 'bzt:';
 const DEFAULTS = {
   interval: 20, tax: 1.25, budget: 10_000_000, share: 10,
   preset: 'balanced',
-  minVolH: 100, minTurnH: 2_000_000, minBalance: 25,
-  minProfit: 1, minPct: 1, maxPct: 150, hideRisky: true,
-  craftBuy: 'order', craftSell: 'offer', craftMinProfit: 0, craftMinPct: 2,
+  minVolH: 100, minTurnH: 2_000_000, minBalance: 30,
+  minProfit: 1, minPct: 2, maxPct: 50, maxMove: 10, hideRisky: true,
+  craftBuy: 'order', craftSell: 'offer', craftMinProfit: 0, craftMinPct: 3,
   marketLiquidOnly: false,
   retentionH: 48, pageSize: 50, sound: true,
 };
-// Strategien: setzen Nachfrage- und Margenfilter auf einen Schlag
+// Strategien: setzen alle Nachfrage-, Margen- und Stabilitätsfilter auf einen Schlag.
+//  Sicher     – Orders füllen sich in Minuten, Preise stabil, dafür kleine Margen
+//  Ausgewogen – gefragte Items mit spürbarer Marge
+//  Riskant    – auch langsame/schwankende Items, aber nur wenn die Marge das Risiko bezahlt
 const PRESETS = {
-  safe:       {label:'Sicher',     desc:'Nur sehr gefragte Items, kleine aber sichere Margen', minVolH: 500, minTurnH: 10_000_000, minBalance: 40, minPct: 2,   maxPct: 50,  craftMinPct: 3, hideRisky: true},
-  balanced:   {label:'Ausgewogen', desc:'Guter Mix aus Tempo und Gewinn',                      minVolH: 100, minTurnH: 2_000_000,  minBalance: 25, minPct: 1,   maxPct: 150, craftMinPct: 2, hideRisky: true},
-  aggressive: {label:'Aggressiv',  desc:'Mehr Treffer und höhere Margen, dafür langsamer',     minVolH: 25,  minTurnH: 500_000,    minBalance: 10, minPct: 0.5, maxPct: 300, craftMinPct: 1, hideRisky: false},
+  safe:     {label:'Sicher',     icon:'🛡', desc:'Sehr gefragte, stabile Items. Orders füllen sich schnell, Margen sind klein.',
+             minVolH: 500, minTurnH: 10_000_000, minBalance: 50, minPct: 1, maxPct: 20,  craftMinPct: 2, maxMove: 5,    hideRisky: true},
+  balanced: {label:'Ausgewogen', icon:'⚖', desc:'Gefragte Items mit spürbarer Marge – der beste Mix aus Tempo und Gewinn.',
+             minVolH: 100, minTurnH: 2_000_000,  minBalance: 30, minPct: 2, maxPct: 50,  craftMinPct: 3, maxMove: 10,   hideRisky: true},
+  risky:    {label:'Riskant',    icon:'🔥', desc:'Auch langsame oder schwankende Items – dafür muss die Marge hoch sein.',
+             minVolH: 10,  minTurnH: 250_000,    minBalance: 10, minPct: 5, maxPct: 300, craftMinPct: 5, maxMove: 1000, hideRisky: false},
 };
-const PRESET_KEYS = ['minVolH','minTurnH','minBalance','minPct','maxPct','craftMinPct','hideRisky'];
+const PRESET_KEYS = ['minVolH','minTurnH','minBalance','minPct','maxPct','craftMinPct','maxMove','hideRisky'];
+// Klartext der Kriterien einer Strategie (für das Filter-Panel)
+function presetRules(p){
+  return [
+    `mind. <b>${fmt(p.minVolH)}</b> Stück/h auf beiden Seiten`,
+    `mind. <b>${fmt(p.minTurnH)}</b> Coins Umsatz/h`,
+    `schwächere Seite ≥ <b>${p.minBalance} %</b> der stärkeren`,
+    `Marge <b>${NF1.format(p.minPct)}–${NF0.format(p.maxPct)} %</b> (Craft ≥ ${NF1.format(p.craftMinPct)} %)`,
+    p.maxMove >= 1000 ? 'Preisschwankung egal' : `Preis in der letzten Stunde max. <b>±${NF1.format(p.maxMove)} %</b> bewegt`,
+    p.hideRisky ? 'Items mit ⚠ Warnung ausgeblendet' : 'Items mit ⚠ Warnung werden gezeigt',
+  ];
+}
 
 // Schieberegler mit festen, sinnvollen Stufen
 const SLIDERS = {
@@ -55,27 +72,47 @@ const SLIDERS = {
   minPct:      {label:'Min. Marge', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
   craftMinPct: {label:'Min. Marge pro Craft', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
   maxPct:      {label:'Max. Marge', steps:[10,20,30,50,75,100,150,200,300,500], f: v => NF0.format(v) + ' %', hint:'Höhere Margen sind oft Manipulation oder kaum gehandelt.'},
+  maxMove:     {label:'Max. Preisbewegung (1 h)', steps:[1,2,3,5,7.5,10,15,25,50,1000], f: v => v >= 1000 ? 'aus' : '±' + NF1.format(v) + ' %', hint:'Blendet Items aus, deren Preis gerade stark springt.'},
   interval:    {label:'Aktualisierung alle', steps:[10,15,20,30,45,60,120], f: v => v + ' s', hint:'Hypixel aktualisiert den Bazaar etwa alle 20 Sekunden.'},
 };
 
-function load(k, d){ try{ const v = localStorage.getItem(LS+k); return v ? JSON.parse(v) : d; }catch{ return d; } }
-function save(k, v){ try{ localStorage.setItem(LS+k, JSON.stringify(v)); }catch{} }
+/* ---------- Speicher: lokal pro Person (Gast oder Konto) + Cloud-Sync ---------- */
+const SYNC_KEYS = ['settings', 'watch', 'alerts', 'sort'];   // diese Daten gehören der Person
+let scope = '';                                              // '' = Gast, 'u:<uid>:' = angemeldet
+const lsKey = k => LS + (SYNC_KEYS.includes(k) ? scope : '') + k;
+function load(k, d){ try{ const v = localStorage.getItem(lsKey(k)); return v ? JSON.parse(v) : d; }catch{ return d; } }
+function save(k, v){
+  try{ localStorage.setItem(lsKey(k), JSON.stringify(v)); }catch{}
+  if (SYNC_KEYS.includes(k)) cloudDirty();
+}
 
 const S = {
-  set: Object.assign({}, DEFAULTS, load('settings', {})),
+  set: {},
   products: {}, rows: [], byId: {}, crafts: [],
   names: {}, npc: {}, tiers: {},
   hist: {},
   lastUpdated: 0, lastFetch: 0, nextAt: 0, paused: false, timer: null, state: 'load', banner: '',
   tool: null, tab: 'overview',
-  sort: Object.assign({flips:{k:'pph',d:-1}, crafts:{k:'pph',d:-1}, market:{k:'wVol',d:-1}, npc:{k:'npcTotal',d:-1}}, load('sort', {})),
+  sort: {},
   pageNo: {}, search: '', drawer: false,
-  watch: load('watch', []), alerts: load('alerts', []),
+  watch: [], alerts: [], user: null, sync: '', lastLocalChange: 0,
   detail: null, craftDetail: null, detailRange: 6*HOUR,
   prevPrice: {}, lastSave: Date.now(), sessionStart: Date.now(), polls: 0,
 };
-// alte Werte, die nicht mehr auf den Reglerstufen liegen, sanft einrasten
-if (S.set.minVolH === 20) S.set.minVolH = 25;
+const DEFAULT_SORT = {flips:{k:'pph',d:-1}, crafts:{k:'pph',d:-1}, market:{k:'wVol',d:-1}, npc:{k:'npcTotal',d:-1}};
+// Persönliche Daten in den Zustand übernehmen (aus lokalem Speicher oder aus der Cloud)
+function applyState(d){
+  S.set = Object.assign({}, DEFAULTS, d.settings || {});
+  if (S.set.preset === 'aggressive') S.set.preset = 'risky';           // alte Bezeichnung
+  if (S.set.preset in PRESETS && S.set.maxMove == null) Object.assign(S.set, pick(PRESETS[S.set.preset], PRESET_KEYS));
+  S.watch = Array.isArray(d.watch) ? d.watch : [];
+  S.alerts = Array.isArray(d.alerts) ? d.alerts : [];
+  S.sort = Object.assign({}, DEFAULT_SORT, d.sort || {});
+}
+function loadLocalState(){ applyState({settings: load('settings', {}), watch: load('watch', []), alerts: load('alerts', []), sort: load('sort', {})}); }
+function snapshotState(){ return {settings: S.set, watch: S.watch, alerts: S.alerts, sort: S.sort}; }
+function pick(o, keys){ const r = {}; for (const k of keys) r[k] = o[k]; return r; }
+loadLocalState();
 
 /* =========================================================
    Formatierung
@@ -330,11 +367,13 @@ function matchSearch(r){
   const q = S.search.toLowerCase();
   return r.name.toLowerCase().includes(q) || r.id.toLowerCase().includes(q);
 }
+// Preis hat sich in der letzten Stunde nicht stärker bewegt als erlaubt (ohne Verlauf: ok)
+function stable(r){ return S.set.maxMove >= 1000 || r.d1h == null || Math.abs(r.d1h) <= S.set.maxMove; }
 function filteredFlips(ignoreSearch){
   const s = S.set;
   return S.rows.filter(r =>
     r.profit >= s.minProfit && r.marginPct >= s.minPct && r.marginPct <= s.maxPct &&
-    liquid(r) && r.buyAt > 0 && r.buyAt <= s.budget &&
+    liquid(r) && stable(r) && r.buyAt > 0 && r.buyAt <= s.budget &&
     (!s.hideRisky || !r.risk.length) && (ignoreSearch || matchSearch(r)));
 }
 
@@ -390,7 +429,7 @@ function computeCrafts(){
 }
 function filteredCrafts(ignoreSearch){
   const s = S.set;
-  return S.crafts.filter(c => c.allLiquid && c.profit >= s.craftMinProfit && c.marginPct >= s.craftMinPct &&
+  return S.crafts.filter(c => c.allLiquid && stable(S.byId[c.id]) && c.profit >= s.craftMinProfit && c.marginPct >= s.craftMinPct &&
     c.marginPct <= s.maxPct && c.cost <= s.budget && (!s.hideRisky || !c.risk.length) &&
     (ignoreSearch || !S.search || (c.name + ' ' + c.ingredients + ' ' + c.id).toLowerCase().includes(S.search.toLowerCase())));
 }
@@ -497,7 +536,7 @@ function livePill(){
 function renderTop(){
   const t = S.tool && TOOL[S.tool];
   if (!t){
-    $('#top').innerHTML = `<div class="topin"><button class="brand" data-nav=""><span class="coin">S</span>SkyBlock Hub</button><div class="spacer"></div>${livePill()}</div>`;
+    $('#top').innerHTML = `<div class="topin"><button class="brand" data-nav=""><span class="coin">S</span>SkyBlock Hub</button><div class="spacer"></div>${livePill()}${accountBtn()}</div>`;
   } else {
     $('#top').innerHTML = `<div class="topin">
         <button class="brand" data-nav="" title="Zurück zum Startbildschirm"><span class="coin">S</span><span class="hidem">SkyBlock Hub</span></button>
@@ -506,6 +545,7 @@ function renderTop(){
         ${livePill()}
         <button class="btn icon" id="pauseBtn" title="Auto-Update pausieren">${S.paused ? '▶' : '⏸'}</button>
         <button class="btn primary" id="refreshBtn" title="Jetzt aktualisieren">↻<span class="hidem"> Aktualisieren</span></button>
+        ${accountBtn()}
       </div>
       <nav class="tabs" id="tabs"></nav>`;
     renderTabs();
@@ -617,7 +657,7 @@ function switchCtl(key, label, sub){
   return `<label class="switch"><span class="t"><b>${label}</b>${sub ? `<small>${sub}</small>` : ''}</span><input type="checkbox" data-set="${key}" ${S.set[key] ? 'checked' : ''}></label>`;
 }
 function presetSeg(){
-  return `<div class="seg" title="Strategie">${Object.entries(PRESETS).map(([k,p]) => `<button data-preset="${k}" class="${S.set.preset === k ? 'on' : ''}" title="${esc(p.desc)}">${p.label}</button>`).join('')}${S.set.preset === 'custom' ? '<button class="on" data-act="filters">Eigene</button>' : ''}</div>`;
+  return `<div class="seg" title="Strategie">${Object.entries(PRESETS).map(([k,p]) => `<button data-preset="${k}" class="${S.set.preset === k ? 'on' : ''}" title="${esc(p.desc)}">${p.icon} ${p.label}</button>`).join('')}${S.set.preset === 'custom' ? '<button class="on" data-act="filters">Eigene</button>' : ''}</div>`;
 }
 
 /* Toolbar über jeder Liste: Suche · Strategie · Filter */
@@ -646,8 +686,10 @@ function renderDrawer(){
   if (kind === 'market'){
     secs.push(`<div class="dsec"><h4>Anzeige</h4>${switchCtl('marketLiquidOnly', 'Nur gefragte Items', 'Blendet Items mit wenig Handel aus')}</div>`);
   } else {
-    secs.push(`<div class="dsec"><h4>Strategie</h4><div class="seg full">${Object.entries(PRESETS).map(([k,p]) => `<button data-preset="${k}" class="${S.set.preset === k ? 'on' : ''}">${p.label}</button>`).join('')}</div>
-      <small class="mut" style="display:block;font-size:12px">${S.set.preset === 'custom' ? 'Eigene Einstellungen – wähle eine Strategie, um zurückzusetzen.' : esc(PRESETS[S.set.preset].desc)}</small></div>`);
+    const cur = PRESETS[S.set.preset];
+    secs.push(`<div class="dsec"><h4>Strategie</h4><div class="seg full">${Object.entries(PRESETS).map(([k,p]) => `<button data-preset="${k}" class="${S.set.preset === k ? 'on' : ''}">${p.icon} ${p.label}</button>`).join('')}</div>
+      ${cur ? `<div class="rules"><p>${esc(cur.desc)}</p><ul>${presetRules(cur).map(x => `<li>${x}</li>`).join('')}</ul></div>`
+            : '<div class="rules"><p>Eigene Einstellungen. Wähle eine Strategie, um alle Filter auf deren Werte zu setzen.</p></div>'}</div>`);
     secs.push(`<div class="dsec"><h4>Kapital</h4>${coinCtl('budget', 'Dein Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b')}${sliderCtl('share')}</div>`);
   }
   secs.push(`<div class="dsec"><h4>Nachfrage <span style="text-transform:none;letter-spacing:0;font-weight:400">· damit sich Orders schnell füllen</span></h4>${sliderCtl('minVolH')}${sliderCtl('minTurnH')}${sliderCtl('minBalance')}</div>`);
@@ -659,7 +701,7 @@ function renderDrawer(){
   } else if (kind !== 'market'){
     secs.push(`<div class="dsec"><h4>Gewinn</h4>${sliderCtl('minPct')}${coinCtl('minProfit', 'Min. Gewinn pro Stück')}${sliderCtl('maxPct')}</div>`);
   }
-  if (kind !== 'market') secs.push(`<div class="dsec"><h4>Sicherheit</h4>${switchCtl('hideRisky', 'Riskante Items ausblenden', 'Preis-Ausreißer, Manipulation, kaum Handel')}</div>`);
+  if (kind !== 'market') secs.push(`<div class="dsec"><h4>Sicherheit</h4>${sliderCtl('maxMove')}${switchCtl('hideRisky', 'Items mit ⚠ ausblenden', 'Preis-Ausreißer, Manipulation, kaum Handel')}</div>`);
   $('#drawer').innerHTML = `<div class="dh"><h2>Filter</h2><div class="spacer"></div><button class="btn icon ghost" data-act="closedrawer" title="Schließen">✕</button></div>
     <div class="db">${secs.join('')}</div>
     <div class="df"><button class="btn" data-preset="balanced">Zurücksetzen</button><button class="btn primary" data-act="closedrawer">Fertig</button></div>`;
@@ -676,7 +718,7 @@ function pageHub(){
     bazaar: [['Bester Flip', has ? fmt(best) + '/h' : '…'], ['Passende Flips', has ? NF0.format(flips.length + crafts.length) : '…'], ['Watchlist', S.watch.length]],
   };
   return `<div class="hub">
-    <div class="hubhead"><div class="coin">S</div><h1>SkyBlock Hub</h1><p>Wähle ein Tool</p></div>
+    <div class="hubhead"><div class="coin">S</div><h1>${S.user ? 'Hallo, ' + esc(S.user.name) + '!' : 'SkyBlock Hub'}</h1><p>Wähle ein Tool</p></div>
     <div class="toolgrid">${TOOLS.map(t => `
       <div class="tool" data-nav="${t.id}">
         <div class="ti">${t.icon}</div><h2>${t.title}</h2><p>${t.desc}</p>
@@ -684,6 +726,7 @@ function pageHub(){
         <div class="go"><span class="live"><i></i>${S.state === 'err' ? 'offline' : 'Live-Daten'}</span><span class="btn primary">Öffnen →</span></div>
       </div>`).join('')}
     </div>
+    ${cloudOn() && !S.user ? `<div class="loginhint"><span>☁</span><div><b>Melde dich an</b>, damit Budget, Strategie, Watchlist und Alarme auf allen Geräten gespeichert bleiben.</div><button class="btn primary" data-act="account">Anmelden</button></div>` : ''}
     <p class="disclaimer">Inoffizielles Fan-Projekt – nicht mit Hypixel oder Mojang verbunden. Daten: offizielle Hypixel-API.</p>
   </div>`;
 }
@@ -737,7 +780,7 @@ const PAGES = {
       <td>${fmt(r.qty)}<div class="sub">${fmt(r.qty * r.buyAt)} Einsatz</div></td>
       <td>${bar(r.pph, max)}</td>
       <td class="${cls(r.d1h)}">${pct(r.d1h)}</td></tr>`).join('');
-    return toolbar('flips', rows.length, 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(8, 'Keine Flips gefunden', 'Probier die Strategie „Aggressiv" oder senke die Filter.')}</tbody></table>${html}</div>
+    return toolbar('flips', rows.length, 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(8, 'Keine Flips gefunden', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table>${html}</div>
       <p class="hint">💡 Buy-Order zum grünen Preis setzen, nach dem Füllen Sell-Offer zum orangen Preis. Klick auf eine Zeile für Verlauf & Orderbuch.</p>`;
   },
 
@@ -759,7 +802,7 @@ const PAGES = {
       <td>${fmt(c.craftsH)}<div class="sub">Engpass: ${esc(c.limitingName)}</div></td>
       <td>${fmt(c.qty)}<div class="sub">${fmt(c.qty * c.cost)} Einsatz</div></td>
       <td>${bar(c.pph, max)}</td></tr>`).join('');
-    return toolbar('crafts', rows.length, 'Craft-Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Keine Craft-Flips gefunden', 'Probier die Strategie „Aggressiv" oder ändere den Craft-Ablauf im Filter.')}</tbody></table>${html}</div>
+    return toolbar('crafts', rows.length, 'Craft-Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Keine Craft-Flips gefunden', 'Probier eine andere Strategie oder ändere den Craft-Ablauf im Filter.')}</tbody></table>${html}</div>
       <p class="hint">💡 Nur Rezepte, bei denen Ergebnis <b>und alle Zutaten</b> im Bazaar gehandelt und gefragt sind – kein Auction House. ${NF0.format(S.crafts.length)} von ${NF0.format(RECIPES.length)} Rezepten sind komplett über den Bazaar machbar. Du brauchst das Rezept freigeschaltet (Collection).</p>`;
   },
 
@@ -865,8 +908,8 @@ function emptyRow(cols, title, txt){ return `<tr style="cursor:default"><td cols
 /* =========================================================
    Detailansicht Item
    ========================================================= */
-function openDetail(id){ closeDrawer(); S.craftDetail = null; S.detail = id; $('#modal').classList.add('on'); renderDetail(false); }
-function closeDetail(){ S.detail = null; S.craftDetail = null; const m = $('#modal'); if (m) m.classList.remove('on'); }
+function openDetail(id){ closeDrawer(); S.craftDetail = null; S.detail = id; S.modalMode = null; $('#sheet').classList.remove('narrow'); $('#modal').classList.add('on'); renderDetail(false); }
+function closeDetail(){ S.detail = null; S.craftDetail = null; S.modalMode = null; const m = $('#modal'); if (m) m.classList.remove('on'); const sh = $('#sheet'); if (sh) sh.classList.remove('narrow'); }
 function book(arr, color, label){
   const top = (arr || []).slice(0, 12);
   const mx = Math.max(1, ...top.map(o => o.amount));
@@ -935,7 +978,7 @@ function renderDetail(update){
 /* =========================================================
    Detailansicht Craft
    ========================================================= */
-function openCraft(ri){ closeDrawer(); S.detail = null; S.craftDetail = ri; $('#modal').classList.add('on'); renderCraftDetail(); }
+function openCraft(ri){ closeDrawer(); S.detail = null; S.craftDetail = ri; S.modalMode = null; $('#sheet').classList.remove('narrow'); $('#modal').classList.add('on'); renderCraftDetail(); }
 function renderCraftDetail(){
   const c = S.crafts.find(x => x.ri === S.craftDetail);
   if (!c){ $('#sheet').innerHTML = '<div class="empty"><b>Rezept aktuell nicht verfügbar</b></div><button class="btn" data-act="close">Schließen</button>'; return; }
@@ -1041,6 +1084,131 @@ function chartHover(e){
 }
 
 /* =========================================================
+   Konten & Cloud-Sync
+   Die Firebase-Anbindung steckt in js/cloud.js (window.Cloud).
+   Ohne Konfiguration läuft alles im Gastmodus nur lokal.
+   ========================================================= */
+const cloudOn = () => !!(window.Cloud && window.Cloud.enabled);
+let pushTimer = null;
+function cloudDirty(){
+  S.lastLocalChange = Date.now();
+  if (!S.user || !cloudOn()) return;
+  S.sync = 'saving'; updateAccountBtn();
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(pushCloud, 1200);
+}
+async function pushCloud(){
+  if (!S.user) return;
+  try{
+    await window.Cloud.save(snapshotState());
+    S.sync = 'saved';
+  }catch(e){ console.warn('Cloud-Speichern fehlgeschlagen', e); S.sync = 'error'; }
+  updateAccountBtn(); if (S.modalMode === 'account') renderAccount();
+}
+function writeLocalCache(){
+  for (const k of SYNC_KEYS){ const v = {settings: S.set, watch: S.watch, alerts: S.alerts, sort: S.sort}[k]; try{ localStorage.setItem(lsKey(k), JSON.stringify(v)); }catch{} }
+}
+function afterStateChange(){
+  schedule();
+  if (S.rows.length) ingest(false); else renderMain(true);
+  renderTop(); if (S.drawer) renderDrawer();
+}
+async function onAuth(user){
+  const guest = snapshotState(), wasGuest = !S.user;
+  S.user = user ? {uid: user.uid, name: user.displayName || (user.email || '').split('@')[0], email: user.email || ''} : null;
+  if (!user){
+    if (wasGuest){ renderTop(); return; }            // war schon Gast – nichts zu tun
+    scope = ''; loadLocalState(); S.sync = ''; afterStateChange(); return;
+  }
+  scope = 'u:' + user.uid + ':';
+  // schnell: letzter lokaler Stand dieses Kontos, dann Cloud
+  if (localStorage.getItem(lsKey('settings'))) loadLocalState();
+  afterStateChange();
+  S.sync = 'loading'; updateAccountBtn();
+  try{
+    const remote = await window.Cloud.load();
+    if (remote){ applyState(remote); writeLocalCache(); S.sync = 'saved'; }
+    else {
+      // neues Konto: bisherige Gast-Daten übernehmen
+      if (wasGuest) applyState(guest);
+      writeLocalCache(); await window.Cloud.save(snapshotState()); S.sync = 'saved';
+      toast('<b>☁ Konto eingerichtet</b><br>Deine bisherigen Einstellungen, Watchlist und Alarme wurden übernommen.');
+    }
+  }catch(e){ console.warn('Cloud-Laden fehlgeschlagen', e); S.sync = 'error'; }
+  afterStateChange();
+  // Änderungen von anderen Geräten live übernehmen
+  window.Cloud.watch(data => {
+    if (!data || Date.now() - S.lastLocalChange < 4000) return;   // eigene, frische Änderungen haben Vorrang
+    applyState(data); writeLocalCache(); afterStateChange();
+  });
+}
+window.addEventListener('cloud-auth', e => onAuth(e.detail));
+window.addEventListener('cloud-ready', () => renderTop());
+
+function accountBtn(){
+  if (!cloudOn()) return '';
+  if (!S.user) return `<button class="btn" data-act="account" id="accBtn">👤<span class="hidem"> Anmelden</span></button>`;
+  const ini = (S.user.name || '?').slice(0, 1).toUpperCase();
+  const st = {saving:'speichert…', loading:'lädt…', error:'Sync-Fehler', saved:'gespeichert'}[S.sync] || '';
+  return `<button class="btn acc" data-act="account" id="accBtn" title="${esc(S.user.email)}"><span class="avatar">${esc(ini)}</span><span class="hidem">${esc(S.user.name)}</span>${st ? `<small class="sync ${S.sync}">☁ ${st}</small>` : ''}</button>`;
+}
+function updateAccountBtn(){ const b = $('#accBtn'); if (b) b.outerHTML = accountBtn(); }
+
+const AUTH_ERR = {
+  'auth/invalid-credential': 'E-Mail oder Passwort stimmt nicht.',
+  'auth/wrong-password': 'E-Mail oder Passwort stimmt nicht.',
+  'auth/user-not-found': 'Zu dieser E-Mail gibt es kein Konto.',
+  'auth/email-already-in-use': 'Diese E-Mail ist schon registriert – melde dich an.',
+  'auth/weak-password': 'Das Passwort braucht mindestens 6 Zeichen.',
+  'auth/invalid-email': 'Das ist keine gültige E-Mail-Adresse.',
+  'auth/missing-password': 'Bitte gib ein Passwort ein.',
+  'auth/too-many-requests': 'Zu viele Versuche – warte kurz und probier es dann nochmal.',
+  'auth/popup-closed-by-user': 'Anmeldefenster wurde geschlossen.',
+  'auth/popup-blocked': 'Der Browser hat das Anmeldefenster blockiert – erlaube Pop-ups für diese Seite.',
+  'auth/unauthorized-domain': 'Diese Domain ist in Firebase noch nicht freigegeben.',
+  'auth/network-request-failed': 'Keine Verbindung – prüfe dein Internet.',
+};
+function openAccount(){ closeDrawer(); S.detail = null; S.craftDetail = null; S.modalMode = 'account'; S.authTab = S.authTab || 'login'; $('#modal').classList.add('on'); renderAccount(); }
+function renderAccount(msg, isErr){
+  const sh = $('#sheet'); sh.classList.add('narrow');
+  // eingegebene Werte beim Neuzeichnen behalten
+  const keep = {}; ['auName', 'auMail', 'auPw'].forEach(id => { const el = document.getElementById(id); if (el) keep[id] = el.value; });
+  if (S.user){
+    const st = {saving:'Speichert gerade…', loading:'Lädt deine Daten…', error:'Speichern fehlgeschlagen – wird bei der nächsten Änderung erneut versucht.', saved:'Alles gespeichert ✓'}[S.sync] || '';
+    sh.innerHTML = `<div class="head"><span class="avatar lg">${esc((S.user.name || '?')[0].toUpperCase())}</span><div><h2>${esc(S.user.name)}</h2><div class="subid">${esc(S.user.email)}</div></div><div class="spacer"></div><button class="btn icon" data-act="close">✕</button></div>
+      <div class="authbox">
+        <div class="syncline ${S.sync}">☁ ${st}</div>
+        <p class="mut">In deinem Konto gespeichert und auf allen Geräten gleich:</p>
+        <ul class="checks"><li>Einstellungen, Budget & Strategie</li><li>Watchlist (${S.watch.length} Items)</li><li>Preis-Alarme (${S.alerts.length})</li><li>Sortierung der Tabellen</li></ul>
+        <p class="mut" style="font-size:12px">Der Preisverlauf wird weiterhin pro Gerät im Browser gesammelt.</p>
+        <button class="btn" style="width:100%" data-act="logout">Abmelden</button>
+      </div>`;
+    return;
+  }
+  const reg = S.authTab === 'register';
+  sh.innerHTML = `<div class="head" style="flex-wrap:nowrap;align-items:flex-start"><div style="flex:1;min-width:0"><h2>${reg ? 'Konto erstellen' : 'Anmelden'}</h2><div class="subid" style="font-family:Inter,sans-serif">Speichere Einstellungen, Watchlist & Alarme in deinem Konto</div></div><button class="btn icon" data-act="close">✕</button></div>
+    <div class="authbox">
+      <div class="seg full"><button data-authtab="login" class="${reg ? '' : 'on'}">Anmelden</button><button data-authtab="register" class="${reg ? 'on' : ''}">Registrieren</button></div>
+      <button class="btn google" data-act="google"><svg width="18" height="18" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z"/><path fill="#FF3D00" d="m6.3 14.7 6.6 4.8C14.7 15.1 19 12 24 12c3 0 5.8 1.1 7.9 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z"/></svg>Mit Google ${reg ? 'registrieren' : 'anmelden'}</button>
+      <div class="or"><span>oder mit E-Mail</span></div>
+      <form id="authForm" autocomplete="on" novalidate>
+        ${reg ? `<label class="lbl">Anzeigename <small>(z. B. dein Minecraft-Name)</small></label><div class="input"><input id="auName" autocomplete="nickname" placeholder="Steve" maxlength="24"></div>` : ''}
+        <label class="lbl">E-Mail</label><div class="input"><input id="auMail" type="email" autocomplete="email" placeholder="du@beispiel.at" required></div>
+        <label class="lbl">Passwort ${reg ? '<small>(mind. 6 Zeichen)</small>' : ''}</label><div class="input"><input id="auPw" type="password" autocomplete="${reg ? 'new-password' : 'current-password'}" required></div>
+        ${msg ? `<div class="authmsg ${isErr ? 'err' : 'ok'}">${esc(msg)}</div>` : ''}
+        <button class="btn primary" style="width:100%;height:42px" type="submit">${reg ? 'Konto erstellen' : 'Anmelden'}</button>
+      </form>
+      ${reg ? '' : '<button class="linkbtn" data-act="pwreset">Passwort vergessen?</button>'}
+      <p class="mut" style="font-size:11.5px;margin:0">Ohne Konto funktioniert alles weiter – gespeichert wird dann nur in diesem Browser.</p>
+    </div>`;
+  for (const id in keep){ const el = document.getElementById(id); if (el) el.value = keep[id]; }
+}
+async function authAction(fn){
+  try{ await fn(); closeDetail(); }
+  catch(e){ renderAccount(AUTH_ERR[e.code] || ('Fehler: ' + (e.code || e.message)), true); }
+}
+
+/* =========================================================
    Einstellungen ändern
    ========================================================= */
 let recalcTimer = null;
@@ -1086,6 +1254,7 @@ document.addEventListener('click', e => {
     save('sort', S.sort); S.pageNo[tab] = 0; renderMain(true); return;
   }
   if ((el = q('[data-pg]'))){ S.pageNo[S.tab] = Math.max(0, (S.pageNo[S.tab] || 0) + +el.dataset.pg); renderMain(true); window.scrollTo({top:0}); return; }
+  if ((el = q('[data-authtab]'))){ S.authTab = el.dataset.authtab; renderAccount(); return; }
   if ((el = q('[data-range]'))){ S.detailRange = +el.dataset.range; renderDetail(false); return; }
   if ((el = q('[data-craft]'))){ openCraft(+el.dataset.craft); return; }
   if ((el = q('[data-open]'))){ openDetail(el.dataset.open); return; }
@@ -1097,6 +1266,14 @@ document.addEventListener('click', e => {
   if (!act) return;
   e.preventDefault();
   if (act === 'close') closeDetail();
+  else if (act === 'account') openAccount();
+  else if (act === 'logout'){ window.Cloud.signOut(); closeDetail(); }
+  else if (act === 'google') authAction(() => window.Cloud.signInGoogle());
+  else if (act === 'pwreset'){
+    const mail = ($('#auMail') || {}).value || '';
+    if (!mail){ renderAccount('Gib zuerst deine E-Mail ein, dann klick nochmal auf „Passwort vergessen?".', true); return; }
+    window.Cloud.reset(mail).then(() => renderAccount('Wir haben dir einen Link zum Zurücksetzen geschickt.', false)).catch(e => renderAccount(AUTH_ERR[e.code] || e.message, true));
+  }
   else if (act === 'filters') openDrawer();
   else if (act === 'closedrawer') closeDrawer();
   else if (act === 'clearsearch'){ S.search = ''; S.pageNo[S.tab] = 0; renderMain(true); const s = $('#search'); if (s) s.focus(); }
@@ -1128,6 +1305,17 @@ document.addEventListener('click', e => {
   else if (act === 'reset'){ S.set = Object.assign({}, DEFAULTS); save('settings', S.set); schedule(); if (S.rows.length) ingest(false); renderMain(true); }
 });
 
+document.addEventListener('submit', e => {
+  if (e.target.id !== 'authForm') return;
+  e.preventDefault();
+  const mail = $('#auMail').value.trim(), pw = $('#auPw').value, name = ($('#auName') || {}).value;
+  if (!mail || !pw){ renderAccount('Bitte gib E-Mail und Passwort ein.', true); return; }
+  if (S.authTab === 'register') authAction(async () => {
+    await window.Cloud.register(mail, pw, (name || '').trim());
+    if (name && name.trim() && S.user){ S.user.name = name.trim(); renderTop(); renderMain(true); }
+  });
+  else authAction(() => window.Cloud.signIn(mail, pw));
+});
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'search'){ S.search = t.value; S.pageNo[S.tab] = 0; renderMain(); return; }
@@ -1150,7 +1338,7 @@ document.addEventListener('change', e => {
 });
 document.addEventListener('keydown', e => {
   const tag = document.activeElement.tagName;
-  if (e.key === 'Escape'){ if (S.detail || S.craftDetail != null) closeDetail(); else if (S.drawer) closeDrawer(); return; }
+  if (e.key === 'Escape'){ if ($('#modal').classList.contains('on')) closeDetail(); else if (S.drawer) closeDrawer(); return; }
   if (e.key === 'Enter' && e.target.dataset && e.target.dataset.coin){ e.target.blur(); return; }
   if (e.key === 'Enter' && e.target.id === 'alVal'){ document.querySelector('[data-act=addalert]').click(); return; }
   if (e.key === '/' && !['INPUT','SELECT','TEXTAREA'].includes(tag)){ const s = $('#search'); if (s){ e.preventDefault(); s.focus(); } }

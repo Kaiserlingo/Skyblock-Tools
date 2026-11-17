@@ -1,0 +1,18 @@
+rules_version = '2';
+
+// Jede Person darf nur ihr eigenes Dokument users/{uid} lesen und schreiben.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid} {
+      allow read, delete: if request.auth != null && request.auth.uid == uid;
+      allow create, update: if request.auth != null && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['settings', 'watch', 'alerts', 'sort', 'updatedAt'])
+        && request.resource.data.watch.size() <= 500
+        && request.resource.data.alerts.size() <= 500;
+    }
+    // alles andere ist gesperrt
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
