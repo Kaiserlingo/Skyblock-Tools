@@ -36,7 +36,7 @@ const DEFAULTS = {
   minProfit: 1, minPct: 2, maxPct: 50, maxMove: 10, hideRisky: true,
   craftBuy: 'order', craftSell: 'offer', craftMinProfit: 0, craftMinPct: 3,
   marketLiquidOnly: false,
-  retentionH: 48, pageSize: 50, sound: true,
+  retentionH: 48, pageSize: 50, sound: true, theme: 'system',
 };
 // Strategien: setzen alle Nachfrage-, Margen- und Stabilitätsfilter auf einen Schlag.
 //  Sicher     – Orders füllen sich in Minuten, Preise stabil, dafür kleine Margen
@@ -102,9 +102,21 @@ function applyState(d){
   S.alerts = Array.isArray(d.alerts) ? d.alerts : [];
   S.sort = Object.assign({}, DEFAULT_SORT, d.sort || {});
 }
+/* Hell / Dunkel: 'system' folgt der Einstellung des Geräts */
+const darkMQ = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+function resolvedTheme(){ return S.set.theme === 'system' ? (darkMQ && darkMQ.matches ? 'dark' : 'light') : S.set.theme; }
+function applyTheme(){
+  const t = resolvedTheme();
+  document.documentElement.dataset.theme = t;
+  const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = t === 'dark' ? '#191e1c' : '#f7f7f4';
+  if (typeof drawChart === 'function' && S.detail) drawChart();
+  const b = document.querySelector('[data-act=theme]'); if (b) b.title = b.ariaLabel = t === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten';
+}
+if (darkMQ) darkMQ.addEventListener('change', () => { if (S.set.theme === 'system') applyTheme(); });
 function loadLocalState(){ applyState({settings: load('settings', {}), watch: load('watch', []), alerts: load('alerts', []), sort: load('sort', {})}); }
 function pick(o, keys){ const r = {}; for (const k of keys) r[k] = o[k]; return r; }
 loadLocalState();
+applyTheme();
 
 /* =========================================================
    Formatierung
@@ -524,6 +536,7 @@ function renderTop(){
       ${t ? `<span class="sep">/</span><span class="toolname">${t.title}</span>` : ''}
       <div class="spacer"></div>
       ${statusEl()}
+      <button class="btn ghost themebtn" data-act="theme" title="${resolvedTheme() === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten'}" aria-label="${resolvedTheme() === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten'}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor"/></svg></button>
       ${t ? `<button class="btn ghost" id="pauseBtn">${S.paused ? 'Fortsetzen' : 'Pausieren'}</button><button class="btn" id="refreshBtn">Aktualisieren</button>` : ''}
     </div>
     ${t ? '<nav class="tabs" id="tabs"></nav>' : ''}`;
@@ -773,7 +786,7 @@ const PAGES = {
       <td>${bar(r.pph, max)}<small>bei ${fmt(r.qty)} Stück</small></td>
       <td class="${cls(r.d1h)}">${pct(r.d1h)}</td></tr>`).join('');
     return toolbar('flips', rows.length, rows.length === 1 ? 'Flip' : 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(8, 'Kein Flip passt.', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table></div>${html}
-      <p class="hint">Setz eine Buy-Order zum grünen Preis. Sobald sie gefüllt ist, stellst du eine Sell-Offer zum braunen Preis ein. Klick auf eine Zeile für Verlauf und Orderbuch.</p>`;
+      <p class="hint">Setz eine Buy-Order zum grünen Preis. Sobald sie gefüllt ist, stellst du eine Sell-Offer zum Preis daneben ein. Klick auf eine Zeile für Verlauf und Orderbuch.</p>`;
   },
 
   crafts(){
@@ -870,6 +883,7 @@ const PAGES = {
     const notifTxt = {granted:'Desktop-Benachrichtigungen sind erlaubt.', denied:'Desktop-Benachrichtigungen sind im Browser blockiert.', default:'Desktop-Benachrichtigungen sind noch nicht erlaubt.', unsupported:'Dein Browser unterstützt keine Desktop-Benachrichtigungen.'}[notif];
     const row = (title, desc, ctl) => `<div class="setrow"><div><h3>${title}</h3>${desc ? `<p>${desc}</p>` : ''}</div><div>${ctl}</div></div>`;
     return `<div class="settings">
+      ${row('Darstellung', 'Mit „Wie System“ folgt die Seite der Hell/Dunkel-Einstellung deines Geräts.', segCtl('theme', [['light','Hell'],['dark','Dunkel'],['system','Wie System']]))}
       ${row('Budget', 'Wie viele Coins du für Flips einsetzen willst.', coinCtl('budget', 'Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b'))}
       ${row('Bazaar-Steuer', 'Standard sind 1,25 %. Mit dem Community-Shop-Upgrade „Bazaar Flipper“ zahlst du weniger.', segCtl('tax', [[1.25,'1,25 %'],[1.125,'1,125 %'],[1,'1 %']]))}
       ${row('Anteil am Handel', 'Wie viel vom stündlichen Handel du realistisch abbekommst. Davon hängen „Profit pro Stunde“ und „Crafts pro Stunde“ ab.', sliderCtl('share'))}
@@ -989,6 +1003,7 @@ function render(){ renderMain(); }
    Chart (ohne externe Bibliothek)
    ========================================================= */
 let chartState = null;
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 function drawChart(){
   const cv = document.getElementById('chart'); if (!cv) return;
   const h = S.hist[S.detail];
@@ -999,7 +1014,7 @@ function drawChart(){
   const W = box.width, H = box.height, L = 74, R = 12, T = 10, B = 26;
   ctx.clearRect(0, 0, W, H);
   ctx.font = '11px IBM Plex Sans, sans-serif';
-  const msg = t => { ctx.fillStyle = '#6b736e'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, W/2, H/2); chartState = null; };
+  const msg = t => { ctx.fillStyle = cssVar('--muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, W/2, H/2); chartState = null; };
   if (!h || h.t.length < 2) return msg('Noch zu wenig Verlauf – ab jetzt wird bei jedem Update aufgezeichnet.');
   const end = h.t[h.t.length-1], start = isFinite(S.detailRange) ? end - S.detailRange : h.t[0];
   let i0 = h.t.findIndex(t => t >= start); if (i0 < 0) i0 = 0;
@@ -1012,7 +1027,7 @@ function drawChart(){
   const t0 = t[0], t1 = t[t.length-1] === t0 ? t0 + 1 : t[t.length-1];
   const X = v => L + (v - t0) / (t1 - t0) * (W - L - R);
   const Y = v => T + (1 - (v - mn) / (mx - mn)) * (H - T - B);
-  ctx.strokeStyle = '#e6e8e3'; ctx.fillStyle = '#6b736e'; ctx.lineWidth = 1; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+  ctx.strokeStyle = cssVar('--line'); ctx.fillStyle = cssVar('--muted'); ctx.lineWidth = 1; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
   for (let i = 0; i <= 4; i++){
     const v = mn + (mx - mn) * i / 4, y = Y(v);
     ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(W - R, y); ctx.stroke();
@@ -1026,10 +1041,10 @@ function drawChart(){
       : d.toLocaleTimeString('de-AT', span < 10*60e3 ? {hour:'2-digit', minute:'2-digit', second:'2-digit'} : {hour:'2-digit', minute:'2-digit'});
     ctx.fillText(lab, X(tv), H - B + 8);
   }
-  ctx.fillStyle = 'rgba(30,106,76,.05)'; ctx.beginPath();
+  ctx.fillStyle = cssVar('--emerald-soft'); ctx.globalAlpha = .55; ctx.beginPath();
   for (let i = 0; i < t.length; i++) ctx.lineTo(X(t[i]), Y(s[i] || b[i]));
   for (let i = t.length-1; i >= 0; i--) ctx.lineTo(X(t[i]), Y(b[i] || s[i]));
-  ctx.closePath(); ctx.fill();
+  ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
   const line = (arr, col) => {
     ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.beginPath(); let started = false;
     for (let i = 0; i < t.length; i++){
@@ -1039,7 +1054,7 @@ function drawChart(){
     }
     ctx.stroke();
   };
-  line(s, '#a0601a'); line(b, '#1e6a4c');
+  line(s, cssVar('--amber')); line(b, cssVar('--emerald'));
   chartState = {t, b, s, X, Y, L, R, W, H, T, B};
 }
 function chartHover(e){
@@ -1050,10 +1065,10 @@ function chartHover(e){
   for (let i = 0; i < cs.t.length; i++){ const d = Math.abs(cs.X(cs.t[i]) - x); if (d < bd){ bd = d; best = i; } }
   drawChart();
   const ctx = e.target.getContext('2d'), px = cs.X(cs.t[best]);
-  ctx.strokeStyle = '#a5aca7'; ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(px, cs.T); ctx.lineTo(px, cs.H - cs.B); ctx.stroke(); ctx.setLineDash([]);
-  for (const [arr, col] of [[cs.s,'#a0601a'],[cs.b,'#1e6a4c']]) if (arr[best] > 0){ ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, cs.Y(arr[best]), 4, 0, 7); ctx.fill(); }
+  ctx.strokeStyle = cssVar('--faint'); ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(px, cs.T); ctx.lineTo(px, cs.H - cs.B); ctx.stroke(); ctx.setLineDash([]);
+  for (const [arr, col] of [[cs.s,cssVar('--amber')],[cs.b,cssVar('--emerald')]]) if (arr[best] > 0){ ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, cs.Y(arr[best]), 4, 0, 7); ctx.fill(); }
   const sp = cs.s[best] && cs.b[best] ? cs.s[best] - cs.b[best] : null;
-  tip.innerHTML = `${new Date(cs.t[best]).toLocaleString('de-AT')}<br><span style="color:#a0601a">Instabuy ${price(cs.s[best])}</span><br><span style="color:#1e6a4c">Instasell ${price(cs.b[best])}</span>${sp != null ? `<br><span style="color:#6b736e">Spread ${price(sp)}</span>` : ''}`;
+  tip.innerHTML = `${new Date(cs.t[best]).toLocaleString('de-AT')}<br><span style="color:var(--amber)">Instabuy ${price(cs.s[best])}</span><br><span style="color:var(--emerald)">Instasell ${price(cs.b[best])}</span>${sp != null ? `<br><span style="color:var(--muted)">Spread ${price(sp)}</span>` : ''}`;
   tip.style.display = 'block';
   tip.style.left = Math.min(px + 12, rect.width - tip.offsetWidth - 4) + 'px';
   tip.style.top = '8px';
@@ -1068,6 +1083,7 @@ function setSetting(key, value, {quiet} = {}){
   if (PRESET_KEYS.includes(key)) S.set.preset = 'custom';
   save('settings', S.set);
   if (key === 'interval') schedule();
+  if (key === 'theme'){ applyTheme(); renderMain(true); return; }
   clearTimeout(recalcTimer);
   const run = () => { if (S.rows.length) ingest(false); else renderMain(); };
   if (quiet) recalcTimer = setTimeout(run, 140); else run();
@@ -1117,6 +1133,7 @@ document.addEventListener('click', e => {
   e.preventDefault();
   if (act === 'close') closeDetail();
   else if (act === 'filters') openDrawer();
+  else if (act === 'theme'){ S.set.theme = resolvedTheme() === 'dark' ? 'light' : 'dark'; save('settings', S.set); applyTheme(); if (S.tab === 'settings' && S.tool) renderMain(true); }
   else if (act === 'closedrawer') closeDrawer();
   else if (act === 'clearsearch'){ S.search = ''; S.pageNo[S.tab] = 0; renderMain(true); const s = $('#search'); if (s) s.focus(); }
   else if (act === 'copy'){
