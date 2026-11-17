@@ -24,6 +24,10 @@
   --flash-dn:#f6e3e3;
   --shadow:rgba(29,36,32,.14);
   --scrim:rgba(29,36,32,.3);
+  --draw:#2f5fc4;
+  --ind1:#7a4fb5;
+  --ind2:#1f8597;
+  --ind3:#8a8f8b;
   --r:6px;
   color-scheme:light;
   --font:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;
@@ -52,6 +56,10 @@
   --flash-dn:rgba(226,117,117,.18);
   --shadow:rgba(0,0,0,.45);
   --scrim:rgba(0,0,0,.5);
+  --draw:#7fa6f5;
+  --ind1:#b796ea;
+  --ind2:#62c4d4;
+  --ind3:#8d958f;
   color-scheme:dark;
 }
 *{box-sizing:border-box}
@@ -65,7 +73,7 @@ a{color:inherit}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 
 /* ---------- Knöpfe ---------- */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 13px;border:1px solid var(--line2);border-radius:var(--r);background:var(--surface);cursor:pointer;font-size:14px;font-weight:500;white-space:nowrap;color:var(--ink)}
+.btn{text-decoration:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 13px;border:1px solid var(--line2);border-radius:var(--r);background:var(--surface);cursor:pointer;font-size:14px;font-weight:500;white-space:nowrap;color:var(--ink)}
 .btn:hover{border-color:var(--ink2)}
 .btn.primary{background:var(--emerald);border-color:var(--emerald);color:var(--on-primary)}
 .btn.primary:hover{background:var(--primary-hover);border-color:var(--primary-hover)}
@@ -118,7 +126,7 @@ main{max-width:1240px;margin:0 auto;padding:32px 28px 96px}
 /* ---------- Übersicht ---------- */
 .summary{color:var(--ink2);margin:0 0 22px;max-width:80ch}
 .summary b{font-weight:600;color:var(--ink)}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:44px 56px;margin-top:40px}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:44px 56px;margin-top:40px}
 .cols section > header{display:flex;align-items:baseline;justify-content:space-between;gap:12px;border-bottom:1px solid var(--ink);padding-bottom:8px}
 .cols h2,.sec{font-size:16px;font-weight:600;margin:0}
 .sec{margin:36px 0 12px}
@@ -255,7 +263,7 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .block > header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px}
 .block h3{margin:0;font-size:15px;font-weight:600}
 .block > header .mut{font-size:13px}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:32px}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:32px}
 .legend{display:flex;gap:16px;font-size:13px;color:var(--muted)}
 .legend span::before{content:"";display:inline-block;width:14px;height:2px;margin-right:6px;vertical-align:middle}
 .legend .l-sell::before{background:var(--amber)}
@@ -310,3 +318,47 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .stratbar .lbl{margin:0}
 .stratbar .note{max-width:52ch}
 body{transition:background-color .2s}
+
+/* ---------- Charts ---------- */
+.amber{color:var(--amber)}
+.pc{position:relative;user-select:none;-webkit-user-select:none;touch-action:none}
+.pc canvas{display:block;width:100%;height:100%;cursor:grab}
+.pc-tip{position:absolute;pointer-events:none;background:var(--surface);border:1px solid var(--line2);border-radius:var(--r);padding:7px 10px;font-size:12.5px;line-height:1.5;display:none;white-space:nowrap;box-shadow:0 4px 14px var(--shadow);z-index:2}
+.pc-tip .a{color:var(--amber)}.pc-tip .e{color:var(--emerald)}.pc-tip .m{color:var(--muted)}
+.pc-text{position:absolute;z-index:3;height:30px;width:220px;border:1px solid var(--draw);border-radius:var(--r);background:var(--surface);color:var(--ink);padding:0 8px;font:inherit;font-size:13px;outline:none}
+.mchart{height:280px;border-top:1px solid var(--line)}
+
+/* ---------- Analyse-Seite ---------- */
+.ana .crumbline{margin:0 0 14px;font-size:14px}
+.ahead{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.ahead h1{margin:0;font-size:clamp(26px,3.4vw,36px);font-weight:600;letter-spacing:-.6px;line-height:1.15}
+.ahead .sub{display:flex;align-items:center;gap:8px;margin:6px 0 0;color:var(--muted);font-size:13.5px}
+.ana-chart{margin-top:28px}
+.ana-chart .ctrl{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-bottom:12px}
+.checks{display:flex;align-items:center;gap:14px;flex-wrap:wrap;font-size:14px}
+.chk{display:inline-flex;align-items:center;gap:6px;cursor:pointer;color:var(--ink2)}
+.chk input{accent-color:var(--emerald);width:15px;height:15px;margin:0}
+.chk.k-hi{border-bottom:2px solid var(--amber)}.chk.k-lo{border-bottom:2px solid var(--emerald)}
+.chk.k-sma{border-bottom:2px solid var(--ind1)}.chk.k-ema{border-bottom:2px solid var(--ind2)}.chk.k-bb{border-bottom:2px dashed var(--ind3)}
+.vsep{width:1px;height:18px;background:var(--line2)}
+.drawtools{display:flex;flex-wrap:wrap;gap:4px;padding:6px;border:1px solid var(--line2);border-bottom:none;border-radius:var(--r) var(--r) 0 0;background:var(--surface)}
+.drawtools button{border:1px solid transparent;background:none;border-radius:4px;padding:5px 10px;font-size:13.5px;cursor:pointer;color:var(--ink2)}
+.drawtools button:hover{background:var(--hover)}
+.drawtools button.on{background:var(--ink);color:var(--on-ink)}
+.drawtools button.danger{color:var(--red)}
+.toolhint{margin:0;padding:6px 10px;font-size:12.5px;color:var(--muted);border:1px solid var(--line2);border-top:1px solid var(--line);border-bottom:none;background:var(--surface)}
+.achart{height:min(62vh,560px);min-height:360px;border:1px solid var(--line2);border-radius:0 0 var(--r) var(--r);background:var(--surface)}
+.legendrow{display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13.5px;margin-top:10px;min-height:20px}
+.legendrow .i1{color:var(--ind1)}.legendrow .i2{color:var(--ind2)}.legendrow .i3{color:var(--ind3)}
+.ana-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px 56px;margin-top:40px}
+.ana-grid section > h2{font-size:16px;font-weight:600;margin:0 0 4px;padding-bottom:8px;border-bottom:1px solid var(--ink)}
+.ana-grid .facts{grid-template-columns:1fr 1fr}
+.ana-grid .wide{grid-column:1/-1}
+.calc{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 6px}
+.calc .input{min-width:0}.calc .input input{width:100%;min-width:0}.calc .unit{font-size:12px;white-space:nowrap}
+.calc .lbl{font-size:13px}
+@media (max-width:900px){
+  .ana-grid{grid-template-columns:1fr}
+  .calc{grid-template-columns:1fr}
+  .achart{height:420px}
+}

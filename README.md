@@ -9,7 +9,8 @@ Persönliche Tool-Sammlung für **Hypixel SkyBlock**
 ```
 index.html                 Seitengerüst
 css/style.css              Design
-js/app.js                  Logik: Datenabruf, Auswertung, Oberfläche
+js/chart.js                Chart mit Zoom, Indikatoren und Zeichenwerkzeugen
+js/app.js                  Logik: Datenabruf, Auswertung, Oberfläche, Analyse-Seite
 data/recipes.json          Crafting-Rezepte (automatisch aktualisiert)
 tools/update_recipes.py    erzeugt recipes.json aus dem NotEnoughUpdates-REPO
 tools/stamp_assets.py      hängt Versions-Hashes an CSS/JS (vor jedem Commit ausführen)
@@ -22,6 +23,7 @@ tools/stamp_assets.py      hängt Versions-Hashes an CSS/JS (vor jedem Commit au
 - Bazaar: `https://api.hypixel.net/v2/skyblock/bazaar` (öffentlich, kein API-Key nötig), wird direkt im Browser abgefragt
 - Item-Namen & NPC-Preise: `https://api.hypixel.net/v2/resources/skyblock/items`
 - Rezepte: [NotEnoughUpdates-REPO](https://github.com/NotEnoughUpdates/NotEnoughUpdates-REPO)
+- Preisverlauf: [SkyCofl](https://sky.coflnet.com/data) (`/api/bazaar/{item}/history/…`), Prices provided by SkyCofl
 
 Der Preisverlauf wird lokal im Browser (IndexedDB) gespeichert. Es gibt keinen Server und keine Konten: Jede Person, die die Seite öffnet, hat ihre eigenen Eingaben – sie bleiben nur in ihrem eigenen Browser.
 

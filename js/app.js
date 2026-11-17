@@ -89,7 +89,7 @@ const S = {
   sort: {},
   pageNo: {}, search: '', drawer: false,
   watch: [], alerts: [],
-  detail: null, craftDetail: null, detailRange: 6*HOUR,
+  detail: null, craftDetail: null, itemId: null, mchart: null, achart: null,
   prevPrice: {}, lastSave: Date.now(), sessionStart: Date.now(), polls: 0,
 };
 const DEFAULT_SORT = {flips:{k:'pph',d:-1}, crafts:{k:'pph',d:-1}, market:{k:'wVol',d:-1}, npc:{k:'npcTotal',d:-1}};
@@ -111,7 +111,7 @@ function applyTheme(){
   const t = resolvedTheme();
   document.documentElement.dataset.theme = t;
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = t === 'dark' ? '#191e1c' : '#f7f7f4';
-  if (typeof drawChart === 'function' && S.detail) drawChart();
+  if (S.mchart) S.mchart.draw(); if (S.achart) S.achart.draw();
   const b = document.querySelector('[data-act=theme]');
   if (b){ b.innerHTML = themeBtnInner(); b.title = t === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten'; b.setAttribute('aria-label', b.title); }
 }
@@ -520,11 +520,15 @@ function banner(html){
   const b = $('#banner'); if (b){ b.innerHTML = html; b.style.display = html ? 'block' : 'none'; }
 }
 function route(){
-  const [tool, tab] = location.hash.replace('#', '').split('/');
+  const [tool, tab, ...rest] = location.hash.replace('#', '').split('/');
+  const prevTab = S.tab;
   if (TOOL[tool]){
     S.tool = tool;
-    S.tab = TOOL[tool].tabs.some(t => t.id === tab) ? tab : TOOL[tool].defaultTab;
+    if (tab === 'item' && rest.length){ S.tab = 'item'; S.itemId = decodeURIComponent(rest.join('/')); }
+    else S.tab = TOOL[tool].tabs.some(t => t.id === tab) ? tab : TOOL[tool].defaultTab;
   } else { S.tool = null; }
+  if (S.tab !== 'item'){ if (S.achart){ S.achart.destroy(); S.achart = null; } }
+  else if (prevTab !== 'item') S.returnTo = prevTab;
   S.search = '';
   closeDrawer(); closeDetail();
   renderTop(); renderMain(true); window.scrollTo({top:0});
@@ -567,17 +571,21 @@ function tick(){
 function renderMain(force){
   const a = document.activeElement;
   if (!force && a && a.closest && a.closest('#view') && a.matches('input:not(#search), select')) return;
+  // Analyse-Seite nur aktualisieren, nicht neu aufbauen (Chart und Zeichnungen bleiben)
+  if (!force && S.tool && S.tab === 'item' && S.achart && S.byId[S.itemId]){ updateAnalysis(); renderTabs(); return; }
   const wasSearch = a && a.id === 'search', pos = wasSearch ? a.selectionStart : 0;
   let html;
   if (!S.tool){ html = pageHub(); document.title = 'SkyBlock Hub'; }
   else {
     const t = TOOL[S.tool], tab = t.tabs.find(x => x.id === S.tab);
-    document.title = tab.label + ' – ' + t.title;
+    document.title = (S.tab === 'item' ? (S.byId[S.itemId] ? S.byId[S.itemId].name : pretty(S.itemId)) + ' – Analyse' : tab.label) + ' – ' + t.title;
     const needsData = !['settings', 'overview', 'watch'].includes(S.tab);
     html = `<div class="banner" id="banner" style="display:${S.banner ? 'block' : 'none'}">${S.banner}</div>` +
       (needsData && !S.rows.length ? '<p class="loading">Die Bazaar-Preise werden geladen …</p>' : PAGES[S.tab]());
   }
+  if (S.achart && S.tab === 'item'){ S.achart.destroy(); S.achart = null; }
   $('#view').innerHTML = html;
+  if (S.tab === 'item' && S.tool) initAnalysis();
   renderTabs();
   if (wasSearch){ const el = $('#search'); if (el){ el.focus(); el.setSelectionRange(pos, pos); } }
 }
@@ -904,7 +912,7 @@ const PAGES = {
    Detailansicht Item
    ========================================================= */
 function openDetail(id){ closeDrawer(); S.craftDetail = null; S.detail = id; $('#modal').classList.add('on'); renderDetail(false); }
-function closeDetail(){ S.detail = null; S.craftDetail = null; const m = $('#modal'); if (m) m.classList.remove('on'); }
+function closeDetail(){ S.detail = null; S.craftDetail = null; if (S.mchart){ S.mchart.destroy(); S.mchart = null; } const m = $('#modal'); if (m) m.classList.remove('on'); }
 function book(arr, side){
   const top = (arr || []).slice(0, 12);
   const mx = Math.max(1, ...top.map(o => o.amount));
@@ -932,7 +940,7 @@ function renderDetail(update){
     $('#dStats').innerHTML = top + more;
     $('#dBuy').innerHTML = book(p.sell_summary, 'buy');
     $('#dSell').innerHTML = book(p.buy_summary, 'sell');
-    drawChart(); return;
+    livePoint(S.mchart, id); return;
   }
   const alerts = S.alerts.map((a, i) => ({a, i})).filter(x => x.a.id === id);
   const watched = S.watch.includes(id);
@@ -940,7 +948,7 @@ function renderDetail(update){
     <header class="dhead">
       <div><h2>${esc(r.name)}</h2><p class="sub">${esc(id)}${S.tiers[id] ? ', ' + esc(title(S.tiers[id])) : ''}</p></div>
       <div class="btnrow">
-        <button class="btn ghost" data-act="copy" title="Namen kopieren, um ihn im Spiel bei /bz einzufügen">Name kopieren</button>
+        <a class="btn primary" href="#bazaar/item/${encodeURIComponent(id)}">Genauer analysieren</a>
         <button class="btn" data-star="${esc(id)}">${watched ? 'Auf der Watchlist ★' : 'Auf die Watchlist ☆'}</button>
         <button class="btn ghost" data-act="close" aria-label="Schließen">Schließen</button>
       </div>
@@ -949,9 +957,9 @@ function renderDetail(update){
     <div id="dStats">${top}${more}</div>
     <section class="block">
       <header><h3>Preisverlauf</h3><span class="legend"><span class="l-sell">Instabuy</span><span class="l-buy">Instasell</span></span><div class="spacer"></div>
-        <div class="seg">${[[HOUR,'1 h'],[6*HOUR,'6 h'],[24*HOUR,'24 h'],[Infinity,'Alles']].map(([v,l]) => `<button class="${S.detailRange === v ? 'on' : ''}" data-range="${v}">${l}</button>`).join('')}</div></header>
-      <div class="chartbox"><canvas id="chart"></canvas><div class="tip" id="tip"></div></div>
-      <p class="hint">${NF0.format(h ? h.t.length : 0)} Datenpunkte, gesammelt in diesem Browser.</p>
+        ${rangeSeg('mrange', chartPrefs.mrange, ['1h','24h','7d','local'])}</header>
+      <div class="mchart" id="mchart"></div>
+      <p class="hint" id="msrc"></p>
     </section>
     <div class="two">
       <section class="block"><header><h3>Buy-Orders</h3><span class="mut">Hier landet deine Buy-Order</span></header><div id="dBuy">${book(p.sell_summary, 'buy')}</div></section>
@@ -965,13 +973,15 @@ function renderDetail(update){
       </div>
       ${alerts.length ? `<ul class="alertlist">${alerts.map(({a,i}) => `<li>${CONDS[a.cond].label} ${price(a.value)} <button class="link danger" data-delalert="${i}">löschen</button></li>`).join('')}</ul>` : ''}
     </section>`;
-  drawChart();
+  if (S.mchart) S.mchart.destroy();
+  S.mchart = new PriceChart($('#mchart'));
+  loadModalChart();
 }
 
 /* =========================================================
    Detailansicht Craft
    ========================================================= */
-function openCraft(ri){ closeDrawer(); S.detail = null; S.craftDetail = ri; $('#modal').classList.add('on'); renderCraftDetail(); }
+function openCraft(ri){ closeDrawer(); if (S.mchart){ S.mchart.destroy(); S.mchart = null; } S.detail = null; S.craftDetail = ri; $('#modal').classList.add('on'); renderCraftDetail(); }
 function renderCraftDetail(){
   const c = S.crafts.find(x => x.ri === S.craftDetail);
   if (!c){ $('#sheet').innerHTML = '<p>Dieses Rezept ist gerade nicht verfügbar.</p><button class="btn" data-act="close">Schließen</button>'; return; }
@@ -1003,78 +1013,254 @@ function rerenderModal(){ if (S.detail) renderDetail(false); else if (S.craftDet
 function render(){ renderMain(); }
 
 /* =========================================================
-   Chart (ohne externe Bibliothek)
+   Preisverlauf: SkyCofl (sky.coflnet.com) mit Rückfall auf den Browser-Verlauf
    ========================================================= */
-let chartState = null;
-const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-function drawChart(){
-  const cv = document.getElementById('chart'); if (!cv) return;
-  const h = S.hist[S.detail];
-  const box = cv.parentElement.getBoundingClientRect();
-  const dpr = window.devicePixelRatio || 1;
-  cv.width = box.width * dpr; cv.height = box.height * dpr;
-  const ctx = cv.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const W = box.width, H = box.height, L = 74, R = 12, T = 10, B = 26;
-  ctx.clearRect(0, 0, W, H);
-  ctx.font = '11px IBM Plex Sans, sans-serif';
-  const msg = t => { ctx.fillStyle = cssVar('--muted'); ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(t, W/2, H/2); chartState = null; };
-  if (!h || h.t.length < 2) return msg('Noch zu wenig Verlauf – ab jetzt wird bei jedem Update aufgezeichnet.');
-  const end = h.t[h.t.length-1], start = isFinite(S.detailRange) ? end - S.detailRange : h.t[0];
-  let i0 = h.t.findIndex(t => t >= start); if (i0 < 0) i0 = 0;
-  const t = h.t.slice(i0), b = h.b.slice(i0), s = h.s.slice(i0);
-  const vals = b.concat(s).filter(v => v > 0);
-  if (t.length < 2 || !vals.length) return msg('Keine Daten in diesem Zeitraum.');
-  let mn = Math.min(...vals), mx = Math.max(...vals);
-  if (mn === mx){ mn *= .99; mx *= 1.01; }
-  const pad = (mx - mn) * .08; mn -= pad; mx += pad;
-  const t0 = t[0], t1 = t[t.length-1] === t0 ? t0 + 1 : t[t.length-1];
-  const X = v => L + (v - t0) / (t1 - t0) * (W - L - R);
-  const Y = v => T + (1 - (v - mn) / (mx - mn)) * (H - T - B);
-  ctx.strokeStyle = cssVar('--line'); ctx.fillStyle = cssVar('--muted'); ctx.lineWidth = 1; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-  for (let i = 0; i <= 4; i++){
-    const v = mn + (mx - mn) * i / 4, y = Y(v);
-    ctx.beginPath(); ctx.moveTo(L, y); ctx.lineTo(W - R, y); ctx.stroke();
-    ctx.fillText(price(v), L - 8, y);
+const COFL = 'https://sky.coflnet.com/api/bazaar/';
+const RANGES = {
+  '1h':    {label: '1 h',     path: '/history/hour', span: HOUR},
+  '24h':   {label: '24 h',    path: '/history/day',  span: 24*HOUR},
+  '7d':    {label: '7 Tage',  path: '/history/week', span: 7*24*HOUR},
+  '30d':   {label: '30 Tage', days: 30,              span: 30*24*HOUR},
+  'local': {label: 'Browser', local: true},
+};
+const chartPrefs = Object.assign({mrange: '24h', arange: '24h', hi: true, lo: true, spread: true, volume: true, sma: false, ema: false, bb: false}, load('chartPrefs', {}));
+function savePrefs(){ save('chartPrefs', chartPrefs); }
+const histCache = {};
+function rangeSeg(attr, cur, keys){ return `<div class="seg">${keys.map(k => `<button data-${attr}="${k}" class="${cur === k ? 'on' : ''}">${RANGES[k].label}</button>`).join('')}</div>`; }
+
+function localSeries(id, span){
+  const h = S.hist[id], d = {t: [], hi: [], lo: [], vb: [], vs: []};
+  if (!h) return d;
+  const from = span ? Date.now() - span : 0;
+  for (let i = 0; i < h.t.length; i++){
+    if (h.t[i] < from) continue;
+    d.t.push(h.t[i]); d.hi.push(h.s[i] || null); d.lo.push(h.b[i] || null); d.vb.push(null); d.vs.push(null);
   }
-  ctx.textAlign = 'center'; ctx.textBaseline = 'top';
-  const span = t1 - t0;
-  for (let i = 0; i <= 5; i++){
-    const tv = t0 + span * i / 5, d = new Date(tv);
-    const lab = span > 20*HOUR ? d.toLocaleString('de-AT', {weekday:'short', hour:'2-digit', minute:'2-digit'})
-      : d.toLocaleTimeString('de-AT', span < 10*60e3 ? {hour:'2-digit', minute:'2-digit', second:'2-digit'} : {hour:'2-digit', minute:'2-digit'});
-    ctx.fillText(lab, X(tv), H - B + 8);
-  }
-  ctx.fillStyle = cssVar('--emerald-soft'); ctx.globalAlpha = .55; ctx.beginPath();
-  for (let i = 0; i < t.length; i++) ctx.lineTo(X(t[i]), Y(s[i] || b[i]));
-  for (let i = t.length-1; i >= 0; i--) ctx.lineTo(X(t[i]), Y(b[i] || s[i]));
-  ctx.closePath(); ctx.fill(); ctx.globalAlpha = 1;
-  const line = (arr, col) => {
-    ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.lineJoin = 'round'; ctx.beginPath(); let started = false;
-    for (let i = 0; i < t.length; i++){
-      if (!(arr[i] > 0)){ started = false; continue; }
-      const x = X(t[i]), y = Y(arr[i]);
-      if (!started){ ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-  };
-  line(s, cssVar('--amber')); line(b, cssVar('--emerald'));
-  chartState = {t, b, s, X, Y, L, R, W, H, T, B};
+  return d;
 }
-function chartHover(e){
-  const cs = chartState, tip = $('#tip'); if (!cs || !tip) return;
-  const rect = e.target.getBoundingClientRect(), x = e.clientX - rect.left;
-  if (x < cs.L || x > cs.W - cs.R){ tip.style.display = 'none'; drawChart(); return; }
-  let best = 0, bd = Infinity;
-  for (let i = 0; i < cs.t.length; i++){ const d = Math.abs(cs.X(cs.t[i]) - x); if (d < bd){ bd = d; best = i; } }
-  drawChart();
-  const ctx = e.target.getContext('2d'), px = cs.X(cs.t[best]);
-  ctx.strokeStyle = cssVar('--faint'); ctx.setLineDash([3,3]); ctx.beginPath(); ctx.moveTo(px, cs.T); ctx.lineTo(px, cs.H - cs.B); ctx.stroke(); ctx.setLineDash([]);
-  for (const [arr, col] of [[cs.s,cssVar('--amber')],[cs.b,cssVar('--emerald')]]) if (arr[best] > 0){ ctx.fillStyle = col; ctx.beginPath(); ctx.arc(px, cs.Y(arr[best]), 4, 0, 7); ctx.fill(); }
-  const sp = cs.s[best] && cs.b[best] ? cs.s[best] - cs.b[best] : null;
-  tip.innerHTML = `${new Date(cs.t[best]).toLocaleString('de-AT')}<br><span style="color:var(--amber)">Instabuy ${price(cs.s[best])}</span><br><span style="color:var(--emerald)">Instasell ${price(cs.b[best])}</span>${sp != null ? `<br><span style="color:var(--muted)">Spread ${price(sp)}</span>` : ''}`;
-  tip.style.display = 'block';
-  tip.style.left = Math.min(px + 12, rect.width - tip.offsetWidth - 4) + 'px';
-  tip.style.top = '8px';
+async function loadHistory(id, range){
+  const R = RANGES[range] || RANGES['24h'];
+  if (R.local) return {data: localSeries(id), source: 'local'};
+  const key = id + '|' + range, c = histCache[key];
+  if (c && Date.now() - c.at < 120e3) return {data: cloneSeries(c.data), source: 'cofl'};
+  const url = COFL + encodeURIComponent(id) + (R.days
+    ? `/history?start=${new Date(Date.now() - R.days * 864e5).toISOString()}&end=${new Date().toISOString()}`
+    : R.path);
+  try{
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(r.status === 429 ? 'zu viele Anfragen' : 'HTTP ' + r.status);
+    const arr = await r.json();
+    if (!Array.isArray(arr) || !arr.length) throw new Error('keine Daten');
+    const pts = arr.map(o => ({t: Date.parse(o.timestamp), a: +o.buy || 0, b: +o.sell || 0, ov: o.buyVolume, bv: o.sellVolume}))
+      .filter(x => isFinite(x.t)).sort((x, y) => x.t - y.t);
+    const d = {t: [], hi: [], lo: [], vb: [], vs: []};
+    for (const x of pts){
+      const v = [x.a, x.b].filter(n => n > 0);
+      d.t.push(x.t); d.hi.push(v.length ? Math.max(...v) : null); d.lo.push(v.length ? Math.min(...v) : null);
+      d.vb.push(x.bv ?? null); d.vs.push(x.ov ?? null);   // Hypixel-Benennung: sellVolume = Buy-Orders, buyVolume = Sell-Offers
+    }
+    histCache[key] = {at: Date.now(), data: d};
+    return {data: cloneSeries(d), source: 'cofl'};
+  }catch(e){
+    return {data: localSeries(id, R.span), source: 'local', error: e.message};
+  }
+}
+function cloneSeries(d){ return {t: [...d.t], hi: [...d.hi], lo: [...d.lo], vb: [...d.vb], vs: [...d.vs]}; }
+// aktuellen Live-Preis an einen Chart anhängen
+function livePoint(chart, id){
+  if (!chart) return;
+  const r = S.byId[id], q = S.products[id] && S.products[id].quick_status;
+  if (!r || !S.lastUpdated) return;
+  // SkyCofl speichert die gewichteten Preise aus quick_status – Live-Punkte passend dazu, sonst Top-of-Book wie im Browser-Verlauf
+  const hi = chart.cofl && q && q.buyPrice ? q.buyPrice : r.topSell, lo = chart.cofl && q && q.sellPrice ? q.sellPrice : r.topBuy;
+  chart.append({t: S.lastUpdated, hi: hi || null, lo: lo || null, vb: q ? q.sellVolume : null, vs: q ? q.buyVolume : null});
+}
+function sourceNote(res, range){
+  if (res.source === 'cofl') return `Preisverlauf: <a href="https://sky.coflnet.com/data" target="_blank" rel="noopener">Prices provided by SkyCofl</a>, ergänzt um Live-Preise.`;
+  if (res.error) return `Der Verlauf von SkyCofl ist gerade nicht erreichbar (${esc(res.error)}). Angezeigt werden die Preise, die dieser Browser selbst gesammelt hat.`;
+  return 'Angezeigt werden die Preise, die dieser Browser selbst gesammelt hat, solange die Seite offen war.';
+}
+async function loadModalChart(){
+  const id = S.detail, ch = S.mchart; if (!id || !ch) return;
+  document.querySelectorAll('[data-mrange]').forEach(b => b.classList.toggle('on', b.dataset.mrange === chartPrefs.mrange));
+  ch.empty = 'Lädt …'; ch.setData({t: []});
+  const res = await loadHistory(id, chartPrefs.mrange);
+  if (S.mchart !== ch || S.detail !== id) return;
+  ch.empty = 'Noch keine Daten für diesen Zeitraum.';
+  ch.setIndicators({volume: false});
+  ch.cofl = res.source === 'cofl'; ch.setData(res.data); livePoint(ch, id);
+  const n = $('#msrc'); if (n) n.innerHTML = sourceNote(res) + ' Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles.';
+}
+
+/* =========================================================
+   Analyse-Seite eines Items  (#bazaar/item/ID)
+   ========================================================= */
+const TOOLS_DRAW = [
+  ['none', 'Bewegen', 'V', 'Ziehen verschiebt, Mausrad zoomt'],
+  ['trend', 'Trendlinie', 'T', 'Zwei Klicks: Start und Ende'],
+  ['hline', 'Horizontale', 'H', 'Ein Klick: Preislinie, z. B. Unterstützung oder Widerstand'],
+  ['rect', 'Zone', 'Z', 'Zwei Klicks: gegenüberliegende Ecken'],
+  ['fib', 'Fibonacci', 'F', 'Zwei Klicks: Hoch und Tief'],
+  ['text', 'Notiz', 'N', 'Ein Klick, dann Text eingeben'],
+  ['measure', 'Messen', 'M', 'Zwei Klicks: Veränderung in Prozent und Zeit'],
+  ['erase', 'Radierer', 'E', 'Klick auf eine Zeichnung löscht sie'],
+];
+let anaTool = 'none', anaRes = null;
+function drawKey(id){ return 'draw:' + id; }
+
+PAGES.item = function(){
+  const id = S.itemId, r = S.byId[id];
+  if (!r) return `<p class="loading">${S.rows.length ? 'Dieses Item gibt es im Bazaar gerade nicht.' : 'Die Bazaar-Preise werden geladen …'}</p><p><button class="link" data-tab="overview">Zur Übersicht</button></p>`;
+  const watched = S.watch.includes(id);
+  const alerts = S.alerts.map((a, i) => ({a, i})).filter(x => x.a.id === id);
+  const qty = Math.max(1, Math.min(r.maxQty || 64, MAX_ORDER));
+  return `<div class="ana">
+    <p class="crumbline"><button class="link" data-act="back">Zurück</button></p>
+    <header class="ahead">
+      <div><h1>${esc(r.name)}</h1><p class="sub"><i class="rar" style="--rc:${rarityColor(id)}"></i>${esc(id)}${S.tiers[id] ? ', ' + esc(title(S.tiers[id])) : ''}</p></div>
+      <div class="btnrow">
+        <button class="btn ghost" data-act="copy" data-name="${esc(r.name)}">Name kopieren</button>
+        <button class="btn" data-star="${esc(id)}">${watched ? 'Auf der Watchlist ★' : 'Auf die Watchlist ☆'}</button>
+      </div>
+    </header>
+    <div id="aFig">${anaFigures(r)}</div>
+
+    <section class="ana-chart">
+      <div class="ctrl">
+        ${rangeSeg('arange', chartPrefs.arange, ['1h','24h','7d','30d','local'])}
+        <div class="checks">
+          ${[['hi','Instabuy'],['lo','Instasell'],['spread','Spread'],['volume','Volumen']].map(([k,l]) => `<label class="chk k-${k}"><input type="checkbox" data-ind="${k}" ${chartPrefs[k] ? 'checked' : ''}>${l}</label>`).join('')}
+          <span class="vsep"></span>
+          ${[['sma','SMA 20'],['ema','EMA 50'],['bb','Bollinger']].map(([k,l]) => `<label class="chk k-${k}"><input type="checkbox" data-ind="${k}" ${chartPrefs[k] ? 'checked' : ''}>${l}</label>`).join('')}
+        </div>
+      </div>
+      <div class="drawtools" role="toolbar" aria-label="Zeichenwerkzeuge">
+        ${TOOLS_DRAW.map(([k, l, key, tip]) => `<button class="${anaTool === k ? 'on' : ''}" data-tool="${k}" title="${tip} (Taste ${key})">${l}</button>`).join('')}
+        <span class="spacer"></span>
+        <button data-act="undo" title="Letzte Zeichnung rückgängig (Strg+Z)">Rückgängig</button>
+        <button data-act="cleardraw" class="danger">Alle Zeichnungen löschen</button>
+      </div>
+      <p class="toolhint" id="toolHint">${TOOLS_DRAW.find(t => t[0] === anaTool)[3]}</p>
+      <div class="achart" id="achart"></div>
+      <div class="legendrow" id="aLegend"></div>
+      <p class="hint" id="aSrc"></p>
+    </section>
+
+    <div class="ana-grid">
+      <section><h2>Im gewählten Zeitraum</h2><div id="aStats"><p class="mut">Lädt …</p></div></section>
+      <section><h2>Flip-Rechner</h2>
+        <div class="calc">
+          <label class="field"><span class="lbl">Menge</span><div class="input"><input id="cQty" inputmode="numeric" value="${qty}"><span class="unit">Stück</span></div></label>
+          <label class="field"><span class="lbl">Kaufen für</span><div class="input"><input id="cBuy" inputmode="decimal" value="${coinText(r1(r.buyAt))}"><span class="unit">pro Stück</span></div></label>
+          <label class="field"><span class="lbl">Verkaufen für</span><div class="input"><input id="cSell" inputmode="decimal" value="${coinText(r1(r.sellAt))}"><span class="unit">pro Stück</span></div></label>
+        </div>
+        <div id="cOut">${calcOut(r)}</div>
+      </section>
+      <section><h2>Buy-Orders</h2><div id="aBuy">${book(S.products[id].sell_summary, 'buy')}</div></section>
+      <section><h2>Sell-Offers</h2><div id="aSell">${book(S.products[id].buy_summary, 'sell')}</div></section>
+      <section class="wide"><h2>Preisalarm</h2>
+        <div class="alertrow">
+          <select id="alCond" aria-label="Bedingung">${Object.entries(CONDS).map(([k,c]) => `<option value="${k}">${c.label}</option>`).join('')}</select>
+          <div class="input"><input id="alVal" inputmode="decimal" placeholder="z. B. 1,5k" value="${r.topSell ? coinText(r1(r.topSell)) : ''}" aria-label="Wert in Coins"><span class="unit">Coins</span></div>
+          <button class="btn primary" data-act="addalert">Alarm anlegen</button>
+        </div>
+        ${alerts.length ? `<ul class="alertlist">${alerts.map(({a,i}) => `<li>${CONDS[a.cond].label} ${price(a.value)} <button class="link danger" data-delalert="${i}">löschen</button></li>`).join('')}</ul>` : ''}
+      </section>
+    </div>
+  </div>`;
+};
+function anaFigures(r){
+  return figures([
+    ['Instabuy', `<span class="amber">${price(r.topSell)}</span>`], ['Instasell', `<span class="pos">${price(r.topBuy)}</span>`],
+    ['Flip-Gewinn pro Stück', `<span class="${cls(r.profit)}">${price(r.profit)}</span>`], ['Profit pro Stunde', fmt(r.pph)],
+  ]) + facts([
+    ['Marge', pct(r.marginPct, false)], ['Spread', pct(r.spreadPct, false)], ['1 h', `<span class="${cls(r.d1h)}">${pct(r.d1h)}</span>`], ['24 h', `<span class="${cls(r.d24h)}">${pct(r.d24h)}</span>`],
+    ['Instabuys pro Woche', fmt(r.wBuy)], ['Instasells pro Woche', fmt(r.wSell)], ['Handel pro Stunde', fmt(r.perHour)], ['Gefragt', liquid(r) ? 'ja' : 'nein'],
+    ['Buy-Orders gesamt', NF0.format(r.sellOrders)], ['Sell-Offers gesamt', NF0.format(r.buyOrders)], ['NPC-Preis', price(r.npc)], ['Strategie-Filter', filteredFlips(true).some(x => x.id === r.id) ? 'passt' : 'passt nicht'],
+  ]);
+}
+function calcOut(r){
+  const q = parseCoins(($('#cQty') || {}).value) || 0, b = parseCoins(($('#cBuy') || {}).value), sl = parseCoins(($('#cSell') || {}).value);
+  const qty = Math.floor(isFinite(q) && q > 0 ? q : (r.maxQty || 0));
+  const buy = isFinite(b) ? b : r.buyAt, sell = isFinite(sl) ? sl : r.sellAt, tax = S.set.tax / 100;
+  const cost = qty * buy, rev = qty * sell * (1 - tax), prof = rev - cost;
+  const fillBuy = r.wSell ? qty / (r.wSell / 168 * S.set.share / 100) : Infinity;   // Buy-Order füllt sich durch Instasells
+  const fillSell = r.wBuy ? qty / (r.wBuy / 168 * S.set.share / 100) : Infinity;
+  const dur = h => !isFinite(h) ? 'unbekannt' : h < 1 ? Math.max(1, Math.round(h * 60)) + ' min' : h < 48 ? NF1.format(h) + ' h' : NF1.format(h / 24) + ' Tage';
+  return facts([
+    ['Einsatz', fmt(cost)], ['Erlös nach Steuer', fmt(rev)], ['Gewinn', `<span class="${cls(prof)}">${fmt(prof)}</span>`], ['Marge', pct(cost ? prof / cost * 100 : 0, false)],
+    ['Buy-Order gefüllt in etwa', dur(fillBuy)], ['Sell-Offer verkauft in etwa', dur(fillSell)],
+  ].concat(qty > MAX_ORDER ? [['Hinweis', `max. ${NF0.format(MAX_ORDER)} pro Order`]] : []));
+}
+function initAnalysis(){
+  const el = $('#achart'); if (!el) return;
+  if (S.achart) S.achart.destroy();
+  const ch = S.achart = new PriceChart(el, {tools: true});
+  ch.setIndicators({hi: chartPrefs.hi, lo: chartPrefs.lo, spread: chartPrefs.spread, volume: chartPrefs.volume, sma: chartPrefs.sma ? 20 : 0, ema: chartPrefs.ema ? 50 : 0, bb: chartPrefs.bb});
+  ch.setDrawings(load(drawKey(S.itemId), []));
+  ch.onChange = dr => save(drawKey(S.itemId), dr);
+  ch.onHover = idx => anaLegend(idx);
+  ch.setTool(anaTool);
+  loadAnalysisChart();
+}
+async function loadAnalysisChart(){
+  const id = S.itemId, ch = S.achart; if (!ch) return;
+  document.querySelectorAll('[data-arange]').forEach(b => b.classList.toggle('on', b.dataset.arange === chartPrefs.arange));
+  ch.empty = 'Lädt …'; ch.setData({t: []});
+  const res = await loadHistory(id, chartPrefs.arange);
+  if (S.achart !== ch || S.itemId !== id) return;
+  anaRes = res;
+  ch.empty = chartPrefs.arange === 'local' ? 'Dieser Browser hat für dieses Item noch keine Preise gesammelt.' : 'Für diesen Zeitraum gibt es keine Daten.';
+  ch.cofl = res.source === 'cofl'; ch.setData(res.data); livePoint(ch, id);
+  $('#aSrc').innerHTML = sourceNote(res) + ' Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles.';
+  anaStats(); anaLegend(null);
+}
+function anaLegend(idx){
+  const el = $('#aLegend'), ch = S.achart; if (!el || !ch) return;
+  const d = ch.data; if (!d.t.length){ el.innerHTML = ''; return; }
+  const i = idx == null ? d.t.length - 1 : idx;
+  const parts = [`<span class="mut">${new Date(d.t[i]).toLocaleString('de-AT', {weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}</span>`];
+  if (d.hi[i] != null) parts.push(`<span class="amber">Instabuy ${price(d.hi[i])}</span>`);
+  if (d.lo[i] != null) parts.push(`<span class="pos">Instasell ${price(d.lo[i])}</span>`);
+  if (d.hi[i] != null && d.lo[i] != null) parts.push(`<span>Spread ${price(d.hi[i] - d.lo[i])}</span>`);
+  if (ch.smaL && ch.smaL[i] != null) parts.push(`<span class="i1">SMA 20 ${price(ch.smaL[i])}</span>`);
+  if (ch.emaL && ch.emaL[i] != null) parts.push(`<span class="i2">EMA 50 ${price(ch.emaL[i])}</span>`);
+  if (ch.bbL && ch.bbL.up[i] != null) parts.push(`<span class="i3">Bollinger ${price(ch.bbL.lo[i])} – ${price(ch.bbL.up[i])}</span>`);
+  if (d.vb[i] != null || d.vs[i] != null) parts.push(`<span class="mut">Volumen ${fmt(d.vb[i])} / ${fmt(d.vs[i])}</span>`);
+  el.innerHTML = parts.join('');
+}
+function anaStats(){
+  const el = $('#aStats'), ch = S.achart; if (!el || !ch) return;
+  const d = ch.data, n = d.t.length;
+  if (n < 2){ el.innerHTML = '<p class="mut">Zu wenige Datenpunkte für eine Auswertung.</p>'; return; }
+  const hi = d.hi.filter(v => v != null), lo = d.lo.filter(v => v != null), mid = ch.mid.filter(v => v != null);
+  const avg = a => a.reduce((x, y) => x + y, 0) / (a.length || 1);
+  const rets = []; for (let i = 1; i < mid.length; i++) if (mid[i-1]) rets.push((mid[i] - mid[i-1]) / mid[i-1]);
+  const sd = Math.sqrt(avg(rets.map(x => (x - avg(rets)) ** 2))) * 100;
+  const spreads = d.hi.map((h, i) => h != null && d.lo[i] ? (h - d.lo[i]) / d.lo[i] * 100 : null).filter(v => v != null);
+  const r = S.byId[S.itemId], chg = mid.length ? (mid[mid.length-1] - mid[0]) / mid[0] * 100 : null;
+  el.innerHTML = facts([
+    ['Zeitraum', `${new Date(d.t[0]).toLocaleDateString('de-AT')} bis ${new Date(d.t[n-1]).toLocaleDateString('de-AT')}`], ['Datenpunkte', NF0.format(n)],
+    ['Höchster Instabuy', price(Math.max(...hi))], ['Tiefster Instabuy', price(Math.min(...hi))],
+    ['Höchster Instasell', price(Math.max(...lo))], ['Tiefster Instasell', price(Math.min(...lo))],
+    ['Ø Instabuy', price(avg(hi))], ['Ø Instasell', price(avg(lo))],
+    ['Veränderung (Mittelkurs)', `<span class="${cls(chg)}">${pct(chg)}</span>`], ['Ø Spread', pct(avg(spreads), false)],
+    ['Schwankung pro Messpunkt', NF2.format(sd) + ' %'], ['Instabuy jetzt vs. Ø', r ? `<span class="${cls(r.topSell - avg(hi))}">${pct((r.topSell - avg(hi)) / avg(hi) * 100)}</span>` : '–'],
+  ]);
+}
+function updateAnalysis(){
+  const r = S.byId[S.itemId]; if (!r) return;
+  const f = $('#aFig'); if (f) f.innerHTML = anaFigures(r);
+  const b = $('#aBuy'); if (b) b.innerHTML = book(S.products[S.itemId].sell_summary, 'buy');
+  const sl = $('#aSell'); if (sl) sl.innerHTML = book(S.products[S.itemId].buy_summary, 'sell');
+  if (document.activeElement && !['cQty','cBuy','cSell'].includes(document.activeElement.id)){ const o = $('#cOut'); if (o) o.innerHTML = calcOut(r); }
+  livePoint(S.achart, S.itemId);
+}
+function setAnaTool(t){
+  anaTool = t;
+  document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === t));
+  const h = $('#toolHint'); if (h) h.textContent = TOOLS_DRAW.find(x => x[0] === t)[3];
+  if (S.achart) S.achart.setTool(t);
 }
 
 /* =========================================================
@@ -1124,7 +1310,9 @@ document.addEventListener('click', e => {
     save('sort', S.sort); S.pageNo[tab] = 0; renderMain(true); return;
   }
   if ((el = q('[data-pg]'))){ S.pageNo[S.tab] = Math.max(0, (S.pageNo[S.tab] || 0) + +el.dataset.pg); renderMain(true); window.scrollTo({top:0}); return; }
-  if ((el = q('[data-range]'))){ S.detailRange = +el.dataset.range; renderDetail(false); return; }
+  if ((el = q('[data-mrange]'))){ chartPrefs.mrange = el.dataset.mrange; savePrefs(); loadModalChart(); return; }
+  if ((el = q('[data-arange]'))){ chartPrefs.arange = el.dataset.arange; savePrefs(); loadAnalysisChart(); return; }
+  if ((el = q('[data-tool]'))){ setAnaTool(el.dataset.tool); return; }
   if ((el = q('[data-craft]'))){ openCraft(+el.dataset.craft); return; }
   if ((el = q('[data-open]'))){ openDetail(el.dataset.open); return; }
   if (t.id === 'modal'){ closeDetail(); return; }
@@ -1136,11 +1324,14 @@ document.addEventListener('click', e => {
   e.preventDefault();
   if (act === 'close') closeDetail();
   else if (act === 'filters') openDrawer();
+  else if (act === 'back'){ nav(S.tool + '/' + (S.returnTo && S.returnTo !== 'item' ? S.returnTo : 'overview')); }
+  else if (act === 'undo'){ if (S.achart) S.achart.undo(); }
+  else if (act === 'cleardraw'){ if (S.achart){ if (el.dataset.sure){ S.achart.clearDrawings(); el.textContent = 'Alle Zeichnungen löschen'; delete el.dataset.sure; } else { el.dataset.sure = 1; el.textContent = 'Wirklich alle löschen?'; } } }
   else if (act === 'theme'){ S.set.theme = resolvedTheme() === 'dark' ? 'light' : 'dark'; save('settings', S.set); applyTheme(); if (S.tab === 'settings' && S.tool) renderMain(true); }
   else if (act === 'closedrawer') closeDrawer();
   else if (act === 'clearsearch'){ S.search = ''; S.pageNo[S.tab] = 0; renderMain(true); const s = $('#search'); if (s) s.focus(); }
   else if (act === 'copy'){
-    const name = S.byId[S.detail]?.name || '';
+    const name = el.dataset.name || S.byId[S.detail]?.name || '';
     const done = () => { el.textContent = 'Kopiert'; setTimeout(() => el.textContent = 'Name kopieren', 1500); };
     (navigator.clipboard ? navigator.clipboard.writeText(name) : Promise.reject()).then(done).catch(() => {
       const ta = document.createElement('textarea'); ta.value = name; document.body.appendChild(ta); ta.select();
@@ -1150,10 +1341,11 @@ document.addEventListener('click', e => {
   else if (act === 'addalert'){
     const inp = $('#alVal'), v = parseCoins(inp.value);
     if (!isFinite(v) || v <= 0){ inp.parentElement.style.borderColor = 'var(--red)'; inp.focus(); return; }
-    S.alerts.push({id: S.detail, cond: $('#alCond').value, value: v, last: 0});
+    const aid = S.detail || S.itemId;
+    S.alerts.push({id: aid, cond: $('#alCond').value, value: v, last: 0});
     save('alerts', S.alerts);
-    if (!S.watch.includes(S.detail)){ S.watch.push(S.detail); save('watch', S.watch); }
-    renderDetail(false); renderMain(true);
+    if (!S.watch.includes(aid)){ S.watch.push(aid); save('watch', S.watch); }
+    if (S.detail) renderDetail(false); renderMain(true);
   }
   else if (act === 'notif'){ try{ Notification.requestPermission().then(() => renderMain(true)); }catch{} }
   else if (act === 'test') notify('Test-Alarm', 'So sieht ein Preis-Alarm aus.');
@@ -1170,6 +1362,7 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'search'){ S.search = t.value; S.pageNo[S.tab] = 0; renderMain(); return; }
+  if (['cQty','cBuy','cSell'].includes(t.id)){ const r = S.byId[S.itemId]; if (r) $('#cOut').innerHTML = calcOut(r); return; }
   if (t.dataset.slider){
     const key = t.dataset.slider, c = SLIDERS[key], v = c.steps[+t.value];
     t.style.setProperty('--p', (t.value / (c.steps.length - 1) * 100).toFixed(1) + '%');
@@ -1186,17 +1379,22 @@ document.addEventListener('change', e => {
     setSetting(key, v); refreshControls(); return;
   }
   if (t.dataset.set && t.type === 'checkbox'){ setSetting(t.dataset.set, t.checked); refreshControls(); }
+  if (t.dataset.ind){
+    chartPrefs[t.dataset.ind] = t.checked; savePrefs();
+    if (S.achart){ S.achart.setIndicators({hi: chartPrefs.hi, lo: chartPrefs.lo, spread: chartPrefs.spread, volume: chartPrefs.volume, sma: chartPrefs.sma ? 20 : 0, ema: chartPrefs.ema ? 50 : 0, bb: chartPrefs.bb}); anaLegend(null); }
+  }
 });
 document.addEventListener('keydown', e => {
   const tag = document.activeElement.tagName;
-  if (e.key === 'Escape'){ if ($('#modal').classList.contains('on')) closeDetail(); else if (S.drawer) closeDrawer(); return; }
+  if (e.key === 'Escape'){ if ($('#modal').classList.contains('on')) closeDetail(); else if (S.drawer) closeDrawer(); else if (S.achart){ S.achart.cancel(); setAnaTool('none'); } return; }
+  if (S.achart && S.tab === 'item' && !['INPUT','SELECT','TEXTAREA'].includes(tag) && !e.altKey){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z'){ e.preventDefault(); S.achart.undo(); return; }
+    if (!e.ctrlKey && !e.metaKey){ const tl = TOOLS_DRAW.find(x => x[2].toLowerCase() === e.key.toLowerCase()); if (tl){ setAnaTool(tl[0]); return; } }
+  }
   if (e.key === 'Enter' && e.target.dataset && e.target.dataset.coin){ e.target.blur(); return; }
   if (e.key === 'Enter' && e.target.id === 'alVal'){ document.querySelector('[data-act=addalert]').click(); return; }
   if (e.key === '/' && !['INPUT','SELECT','TEXTAREA'].includes(tag)){ const s = $('#search'); if (s){ e.preventDefault(); s.focus(); } }
 });
-document.addEventListener('mousemove', e => { if (e.target.id === 'chart') chartHover(e); });
-document.addEventListener('mouseleave', e => { if (e.target.id === 'chart'){ const tp = $('#tip'); if (tp) tp.style.display = 'none'; drawChart(); } }, true);
-window.addEventListener('resize', () => { if (S.detail) drawChart(); });
 window.addEventListener('hashchange', route);
 window.addEventListener('beforeunload', () => { DB.saveAll(S.hist); });
 document.addEventListener('visibilitychange', () => {
