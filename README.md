@@ -21,34 +21,12 @@ Persönliche Tool-Sammlung für **Hypixel SkyBlock**, als statische Website übe
 | Max. Preisbewegung (1 h) | ± 5 % | ± 10 % | egal |
 | Items mit ⚠ Warnung | ausgeblendet | ausgeblendet | sichtbar |
 
-## Konten (Firebase)
-
-Ohne Anmeldung läuft alles im **Gastmodus** – gespeichert wird nur im Browser.
-Mit Konto werden **Einstellungen, Watchlist, Alarme und Sortierung** pro Person in Cloud Firestore
-gespeichert (`users/{uid}`) und live zwischen Geräten synchronisiert. Beim ersten Anmelden werden die
-bisherigen Gast-Daten übernommen. Der Preisverlauf bleibt pro Gerät im Browser.
-
-**Einrichtung (einmalig):**
-1. [console.firebase.google.com](https://console.firebase.google.com) → Projekt erstellen (Google Analytics nicht nötig)
-2. *Authentication* → Jetzt starten → Anbieter **E-Mail/Passwort** und **Google** aktivieren
-3. *Authentication → Einstellungen → Autorisierte Domains* → `kaiserlingo.github.io` hinzufügen
-4. *Firestore Database* → Datenbank erstellen → Standort `eur3` oder `europe-west3`, Produktionsmodus →
-   Tab *Regeln*: Inhalt von [`firestore.rules`](firestore.rules) einfügen → Veröffentlichen
-5. *Projekteinstellungen → Allgemein → Meine Apps* → Web-App `</>` hinzufügen → die angezeigte
-   `firebaseConfig` in [`js/firebase-config.js`](js/firebase-config.js) eintragen
-
-Die Werte in `firebase-config.js` sind öffentlich; geschützt werden die Daten durch die Security Rules
-(jede Person kann nur ihr eigenes Dokument lesen und schreiben).
-
 ## Dateien
 
 ```
 index.html                 Seitengerüst
 css/style.css              Design
-js/app.js                  Logik: Datenabruf, Auswertung, Oberfläche, Konto-Sync
-js/cloud.js                Firebase-Anbindung (Login + Firestore), stellt window.Cloud bereit
-js/firebase-config.js      Firebase-Konfiguration (leer = Gastmodus)
-firestore.rules            Security Rules für Firestore
+js/app.js                  Logik: Datenabruf, Auswertung, Oberfläche
 data/recipes.json          Crafting-Rezepte (automatisch aktualisiert)
 tools/update_recipes.py    erzeugt recipes.json aus dem NotEnoughUpdates-REPO
 .github/workflows/         wöchentliches Rezept-Update
@@ -63,7 +41,7 @@ tools/update_recipes.py    erzeugt recipes.json aus dem NotEnoughUpdates-REPO
 - Item-Namen & NPC-Preise: `https://api.hypixel.net/v2/resources/skyblock/items`
 - Rezepte: [NotEnoughUpdates-REPO](https://github.com/NotEnoughUpdates/NotEnoughUpdates-REPO)
 
-Der Preisverlauf wird lokal im Browser (IndexedDB) gespeichert. Persönliche Daten werden nur gespeichert, wenn sich jemand anmeldet – und dann nur Einstellungen, Watchlist, Alarme und Sortierung.
+Der Preisverlauf wird lokal im Browser (IndexedDB) gespeichert. Es gibt keinen Server und keine Konten: Jede Person, die die Seite öffnet, hat ihre eigenen Eingaben – sie bleiben nur in ihrem eigenen Browser.
 
 ---
 
