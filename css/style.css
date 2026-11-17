@@ -304,6 +304,9 @@ input[type=range]::-moz-range-thumb{width:12px;height:12px;border-radius:50%;bac
 .setrow .slider .head{justify-content:flex-end}
 
 /* Umschalter Hell/Dunkel in der Kopfzeile */
-.themebtn{width:34px;padding:0}
-.themebtn svg{width:16px;height:16px}
+.themebtn{gap:7px;padding:0 10px}
+.themebtn svg{width:16px;height:16px;flex:none}
+.stratbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:18px 0 14px}
+.stratbar .lbl{margin:0}
+.stratbar .note{max-width:52ch}
 body{transition:background-color .2s}

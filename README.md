@@ -29,6 +29,7 @@ css/style.css              Design
 js/app.js                  Logik: Datenabruf, Auswertung, Oberfläche
 data/recipes.json          Crafting-Rezepte (automatisch aktualisiert)
 tools/update_recipes.py    erzeugt recipes.json aus dem NotEnoughUpdates-REPO
+tools/stamp_assets.py      hängt Versions-Hashes an CSS/JS (vor jedem Commit ausführen)
 .github/workflows/         wöchentliches Rezept-Update
 ```
 

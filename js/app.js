@@ -105,12 +105,15 @@ function applyState(d){
 /* Hell / Dunkel: 'system' folgt der Einstellung des Geräts */
 const darkMQ = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
 function resolvedTheme(){ return S.set.theme === 'system' ? (darkMQ && darkMQ.matches ? 'dark' : 'light') : S.set.theme; }
+const THEME_ICON = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor"/></svg>';
+function themeBtnInner(){ return THEME_ICON + `<span class="hidem">${resolvedTheme() === 'dark' ? 'Hell' : 'Dunkel'}</span>`; }
 function applyTheme(){
   const t = resolvedTheme();
   document.documentElement.dataset.theme = t;
   const m = document.querySelector('meta[name=theme-color]'); if (m) m.content = t === 'dark' ? '#191e1c' : '#f7f7f4';
   if (typeof drawChart === 'function' && S.detail) drawChart();
-  const b = document.querySelector('[data-act=theme]'); if (b) b.title = b.ariaLabel = t === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten';
+  const b = document.querySelector('[data-act=theme]');
+  if (b){ b.innerHTML = themeBtnInner(); b.title = t === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten'; b.setAttribute('aria-label', b.title); }
 }
 if (darkMQ) darkMQ.addEventListener('change', () => { if (S.set.theme === 'system') applyTheme(); });
 function loadLocalState(){ applyState({settings: load('settings', {}), watch: load('watch', []), alerts: load('alerts', []), sort: load('sort', {})}); }
@@ -536,7 +539,7 @@ function renderTop(){
       ${t ? `<span class="sep">/</span><span class="toolname">${t.title}</span>` : ''}
       <div class="spacer"></div>
       ${statusEl()}
-      <button class="btn ghost themebtn" data-act="theme" title="${resolvedTheme() === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten'}" aria-label="${resolvedTheme() === 'dark' ? 'Hellen Modus einschalten' : 'Dunkelmodus einschalten'}"><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.75a6.25 6.25 0 0 1 0 12.5z" fill="currentColor"/></svg></button>
+      <button class="btn ghost themebtn" data-act="theme">${themeBtnInner()}</button>
       ${t ? `<button class="btn ghost" id="pauseBtn">${S.paused ? 'Fortsetzen' : 'Pausieren'}</button><button class="btn" id="refreshBtn">Aktualisieren</button>` : ''}
     </div>
     ${t ? '<nav class="tabs" id="tabs"></nav>' : ''}`;
@@ -749,10 +752,10 @@ const PAGES = {
     const has = S.rows.length > 0;
     const list = (rows, emptyTxt) => rows.length ? `<ul class="rank">${rows.join('')}</ul>` : `<p class="muted-note">${emptyTxt}</p>`;
     const row = (attr, id, name, sub, val, valSub, valCls) => `<li ${attr}>${itemCell(id, name, sub)}<span class="v ${valCls || ''}">${val}<small>${valSub}</small></span></li>`;
-    const strat = PRESETS[S.set.preset]?.label || 'eigenen Filtern';
     return `
       <h1 class="lead small">${leadSentence(bestNow())}</h1>
-      <p class="summary">${has ? `${NF0.format(liq.length)} von ${NF0.format(S.rows.length)} Bazaar-Produkten werden gerade genug gehandelt. Du suchst mit der Strategie ${strat} und ${words(S.set.budget)} Coins Budget.` : ''} <button class="link" data-act="filters">Filter ändern</button></p>
+      <div class="stratbar"><span class="lbl">Strategie</span>${presetSeg()}<span class="note">${PRESETS[S.set.preset] ? esc(PRESETS[S.set.preset].desc) : 'Eigene Filtereinstellungen.'}</span></div>
+      <p class="summary">${has ? `${NF0.format(liq.length)} von ${NF0.format(S.rows.length)} Bazaar-Produkten werden gerade genug gehandelt. Dein Budget: ${words(S.set.budget)} Coins.` : ''} <button class="link" data-act="filters">Alle Filter</button></p>
       <div class="cols">
         <section><header><h2>Beste Flips</h2>${flips.length ? `<button class="link" data-tab="flips">Alle ${flips.length} ansehen</button>` : ''}</header>
           ${list(flips.slice(0, 5).map(r => row(`data-open="${esc(r.id)}"`, r.id, r.name, `${price(r.buyAt)} kaufen, ${price(r.sellAt)} verkaufen`, fmt(r.pph), 'pro Stunde')), has ? 'Kein Flip passt zu deinen Filtern.' : 'Wird geladen …')}</section>
