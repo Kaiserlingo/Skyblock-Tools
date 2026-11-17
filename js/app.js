@@ -1,24 +1,24 @@
 'use strict';
 /* =========================================================
-   MODULE – hier neue SkyBlock-Funktionen eintragen.
-   Jedes Modul: id, Gruppe, Icon, Titel, Beschreibung, render().
-   soon:true = Platzhalter auf der Startseite & in der Navigation.
+   TOOLS – der Startbildschirm zeigt jedes Tool als Karte.
+   Neues Tool: Eintrag ergänzen (id, icon, title, desc, tabs, render)
+   und die Seiten als Funktionen schreiben, die HTML zurückgeben.
    ========================================================= */
-const MODULES = [
-  {id:'home',     group:'',          icon:'🏠', title:'Übersicht',         desc:'Alles Wichtige auf einen Blick',            render:() => renderHome()},
-  {id:'flips',    group:'Bazaar',    icon:'💰', title:'Bazaar-Flips',      desc:'Buy-Order setzen, mit Sell-Offer verkaufen', render:() => renderFlips()},
-  {id:'crafts',   group:'Bazaar',    icon:'🔨', title:'Craft-Flips',       desc:'Zutaten kaufen, craften, teurer verkaufen',  render:() => renderCrafts()},
-  {id:'npc',      group:'Bazaar',    icon:'🏪', title:'NPC-Flips',         desc:'Im Bazaar kaufen, an NPCs verkaufen',        render:() => renderNpc()},
-  {id:'market',   group:'Bazaar',    icon:'📊', title:'Marktübersicht',    desc:'Alle Bazaar-Produkte live',                  render:() => renderMarket()},
-  {id:'watch',    group:'Bazaar',    icon:'⭐', title:'Watchlist & Alarme', desc:'Deine Items und Preis-Alarme',              render:() => renderWatch()},
-  {id:'ah',       group:'Bald',      icon:'🏛', title:'Auktionshaus',      desc:'BIN-Snipes und AH-Flips',            soon:true},
-  {id:'forge',    group:'Bald',      icon:'🔥', title:'Forge-Flips',       desc:'Profit pro Stunde in der Forge',     soon:true},
-  {id:'minions',  group:'Bald',      icon:'⛏', title:'Minion-Rechner',    desc:'Welche Minions lohnen sich?',        soon:true},
-  {id:'mayor',    group:'Bald',      icon:'🗳', title:'Mayor & Events',    desc:'Aktueller Mayor, Perks, Kalender',   soon:true},
-  {id:'profile',  group:'Bald',      icon:'👤', title:'Spieler-Profil',    desc:'Networth, Skills, Collections',      soon:true},
-  {id:'settings', group:'System',    icon:'⚙',  title:'Einstellungen',     desc:'Budget, Steuer, Filter, Daten',             render:() => renderSettings()},
+const BAZAAR_TABS = [
+  {id:'overview', label:'Übersicht',   icon:'🏠'},
+  {id:'flips',    label:'Flips',       icon:'💰'},
+  {id:'crafts',   label:'Craft-Flips', icon:'🔨'},
+  {id:'npc',      label:'NPC-Flips',   icon:'🏪'},
+  {id:'market',   label:'Markt',       icon:'📊'},
+  {id:'watch',    label:'Watchlist',   icon:'⭐'},
+  {id:'settings', label:'Einstellungen', icon:'⚙'},
 ];
-const MOD = Object.fromEntries(MODULES.map(m => [m.id, m]));
+const TOOLS = [
+  {id:'bazaar', icon:'💰', title:'Bazaar Flipper',
+   desc:'Live-Flips mit Buy-Orders, Craft-Flips nur über den Bazaar, NPC-Flips, Marktübersicht und Preis-Alarme.',
+   tabs: BAZAAR_TABS, defaultTab:'overview'},
+];
+const TOOL = Object.fromEntries(TOOLS.map(t => [t.id, t]));
 
 /* =========================================================
    Konstanten & Zustand
@@ -38,32 +38,44 @@ const DEFAULTS = {
   marketLiquidOnly: false,
   retentionH: 48, pageSize: 50, sound: true,
 };
-// Strategien: setzen die Nachfrage- und Margenfilter auf einen Schlag
+// Strategien: setzen Nachfrage- und Margenfilter auf einen Schlag
 const PRESETS = {
-  safe:       {label:'Sicher',      minVolH: 500, minTurnH: 10_000_000, minBalance: 40, minPct: 2,   maxPct: 50,  craftMinPct: 3, hideRisky: true},
-  balanced:   {label:'Ausgewogen',  minVolH: 100, minTurnH: 2_000_000,  minBalance: 25, minPct: 1,   maxPct: 150, craftMinPct: 2, hideRisky: true},
-  aggressive: {label:'Aggressiv',   minVolH: 20,  minTurnH: 500_000,    minBalance: 10, minPct: 0.5, maxPct: 300, craftMinPct: 1, hideRisky: false},
+  safe:       {label:'Sicher',     desc:'Nur sehr gefragte Items, kleine aber sichere Margen', minVolH: 500, minTurnH: 10_000_000, minBalance: 40, minPct: 2,   maxPct: 50,  craftMinPct: 3, hideRisky: true},
+  balanced:   {label:'Ausgewogen', desc:'Guter Mix aus Tempo und Gewinn',                      minVolH: 100, minTurnH: 2_000_000,  minBalance: 25, minPct: 1,   maxPct: 150, craftMinPct: 2, hideRisky: true},
+  aggressive: {label:'Aggressiv',  desc:'Mehr Treffer und höhere Margen, dafür langsamer',     minVolH: 25,  minTurnH: 500_000,    minBalance: 10, minPct: 0.5, maxPct: 300, craftMinPct: 1, hideRisky: false},
 };
 const PRESET_KEYS = ['minVolH','minTurnH','minBalance','minPct','maxPct','craftMinPct','hideRisky'];
+
+// Schieberegler mit festen, sinnvollen Stufen
+const SLIDERS = {
+  share:       {label:'Dein Anteil am Volumen', steps:[1,2,3,5,7.5,10,15,20,25,35,50], f: v => NF1.format(v) + ' %', hint:'Wie viel vom stündlichen Handel du realistisch abbekommst.'},
+  minVolH:     {label:'Min. Stück pro Stunde', steps:[0,10,25,50,100,250,500,1000,2500,5000,10000], f: v => v ? fmt(v) + ' / h' : 'aus', hint:'Auf beiden Seiten – Instabuys und Instasells.'},
+  minTurnH:    {label:'Min. Umsatz pro Stunde', steps:[0,250e3,500e3,1e6,2e6,5e6,10e6,25e6,50e6,100e6], f: v => v ? fmt(v) + ' Coins' : 'aus', hint:'Coins, die pro Stunde auf beiden Seiten umgesetzt werden.'},
+  minBalance:  {label:'Ausgeglichenheit', steps:[0,5,10,15,20,25,30,40,50,60,75], f: v => v ? 'ab ' + v + ' %' : 'aus', hint:'Die schwächere Seite braucht mind. so viel % der stärkeren.'},
+  minPct:      {label:'Min. Marge', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
+  craftMinPct: {label:'Min. Marge pro Craft', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
+  maxPct:      {label:'Max. Marge', steps:[10,20,30,50,75,100,150,200,300,500], f: v => NF0.format(v) + ' %', hint:'Höhere Margen sind oft Manipulation oder kaum gehandelt.'},
+  interval:    {label:'Aktualisierung alle', steps:[10,15,20,30,45,60,120], f: v => v + ' s', hint:'Hypixel aktualisiert den Bazaar etwa alle 20 Sekunden.'},
+};
+
+function load(k, d){ try{ const v = localStorage.getItem(LS+k); return v ? JSON.parse(v) : d; }catch{ return d; } }
+function save(k, v){ try{ localStorage.setItem(LS+k, JSON.stringify(v)); }catch{} }
 
 const S = {
   set: Object.assign({}, DEFAULTS, load('settings', {})),
   products: {}, rows: [], byId: {}, crafts: [],
   names: {}, npc: {}, tiers: {},
   hist: {},
-  lastUpdated: 0, lastFetch: 0, nextAt: 0, paused: false, timer: null, state: 'load',
-  page: (location.hash.replace('#','') || 'home'),
+  lastUpdated: 0, lastFetch: 0, nextAt: 0, paused: false, timer: null, state: 'load', banner: '',
+  tool: null, tab: 'overview',
   sort: Object.assign({flips:{k:'pph',d:-1}, crafts:{k:'pph',d:-1}, market:{k:'wVol',d:-1}, npc:{k:'npcTotal',d:-1}}, load('sort', {})),
-  pageNo: {}, search: '',
-  filterOpen: load('filterOpen', false),
+  pageNo: {}, search: '', drawer: false,
   watch: load('watch', []), alerts: load('alerts', []),
   detail: null, craftDetail: null, detailRange: 6*HOUR,
   prevPrice: {}, lastSave: Date.now(), sessionStart: Date.now(), polls: 0,
 };
-if (!MOD[S.page]) S.page = 'home';
-
-function load(k, d){ try{ const v = localStorage.getItem(LS+k); return v ? JSON.parse(v) : d; }catch{ return d; } }
-function save(k, v){ try{ localStorage.setItem(LS+k, JSON.stringify(v)); }catch{} }
+// alte Werte, die nicht mehr auf den Reglerstufen liegen, sanft einrasten
+if (S.set.minVolH === 20) S.set.minVolH = 25;
 
 /* =========================================================
    Formatierung
@@ -432,64 +444,113 @@ function toast(html, id){
 }
 
 /* =========================================================
-   Rahmen: Navigation, Status, Seitentitel
+   Eingaben: Coins mit Kurzschreibweise (10m, 2,5k, 1.2b)
+   ========================================================= */
+function parseCoins(str){
+  if (str == null) return NaN;
+  let s = String(str).trim().toLowerCase().replace(/\s|coins?/g, '');
+  if (!s) return NaN;
+  const m = s.match(/^([0-9.,]+)([kmb]?)$/);
+  if (!m) return NaN;
+  let num = m[1];
+  // "1.000.000" (Tausenderpunkte) vs "2,5" / "2.5" (Dezimal)
+  if (/^\d{1,3}(\.\d{3})+$/.test(num)) num = num.replace(/\./g, '');
+  else if (/^\d{1,3}(,\d{3})+$/.test(num) && !m[2]) num = num.replace(/,/g, '');
+  else num = num.replace(',', '.');
+  const v = parseFloat(num);
+  if (!isFinite(v)) return NaN;
+  return v * ({k:1e3, m:1e6, b:1e9}[m[2]] || 1);
+}
+function coinText(v){
+  if (!isFinite(v)) return '';
+  if (v >= 1e9 && v % 1e7 === 0) return NF2.format(v/1e9).replace(/,00$/, '') + 'b';
+  if (v >= 1e6 && v % 1e4 === 0) return NF2.format(v/1e6).replace(/,00$/, '') + 'm';
+  if (v >= 1e4 && v % 100 === 0) return NF1.format(v/1e3).replace(/,0$/, '') + 'k';
+  return NF1.format(v);
+}
+
+/* =========================================================
+   Rahmen: Top-Leiste, Status, Routing
    ========================================================= */
 const $ = s => document.querySelector(s);
-function banner(html){ const b = $('#banner'); b.innerHTML = html; b.style.display = html ? 'block' : 'none'; }
+function banner(html){
+  S.banner = html;
+  const b = $('#banner'); if (b){ b.innerHTML = html; b.style.display = html ? 'block' : 'none'; }
+}
+function route(){
+  const [tool, tab] = location.hash.replace('#', '').split('/');
+  if (TOOL[tool]){
+    S.tool = tool;
+    S.tab = TOOL[tool].tabs.some(t => t.id === tab) ? tab : TOOL[tool].defaultTab;
+  } else { S.tool = null; }
+  S.search = '';
+  closeDrawer(); closeDetail();
+  renderTop(); renderMain(true); window.scrollTo({top:0});
+}
+function nav(hash){ if (location.hash === '#' + hash) route(); else location.hash = hash; }
 
-function renderNav(){
-  const groups = [];
-  for (const m of MODULES){ let g = groups.find(x => x.name === m.group); if (!g) groups.push(g = {name: m.group, items: []}); g.items.push(m); }
-  const labels = {Bald:'Geplant', System:'System', Bazaar:'Bazaar'};
-  $('#navlist').innerHTML = groups.map(g => `<div class="navgroup">${g.name ? `<h5>${labels[g.name] || g.name}</h5>` : ''}${g.items.map(m => {
-    let extra = '';
-    if (m.soon) extra = '<span class="soon">bald</span>';
-    else if (m.id === 'flips' && S.rows.length) extra = `<span class="badge">${filteredFlips(true).length}</span>`;
-    else if (m.id === 'crafts' && S.rows.length) extra = `<span class="badge">${filteredCrafts(true).length}</span>`;
-    else if (m.id === 'watch' && S.watch.length) extra = `<span class="badge">${S.watch.length}</span>`;
-    return `<button class="nav ${S.page === m.id ? 'on' : ''}" data-go="${m.id}"><span class="ico">${m.icon}</span>${m.title}${extra}</button>`;
-  }).join('')}</div>`).join('');
+function livePill(){
+  return `<div class="livepill" title="Status der Live-Daten">
+    <svg class="ring" id="ring" viewBox="0 0 22 22"><circle class="bgc" cx="11" cy="11" r="8"/><circle class="fg" id="ringfg" cx="11" cy="11" r="8" stroke-dasharray="50.27" stroke-dashoffset="50.27"/></svg>
+    <span id="statusTxt" class="hidem">Starte…</span></div>`;
+}
+function renderTop(){
+  const t = S.tool && TOOL[S.tool];
+  if (!t){
+    $('#top').innerHTML = `<div class="topin"><button class="brand" data-nav=""><span class="coin">S</span>SkyBlock Hub</button><div class="spacer"></div>${livePill()}</div>`;
+  } else {
+    $('#top').innerHTML = `<div class="topin">
+        <button class="brand" data-nav="" title="Zurück zum Startbildschirm"><span class="coin">S</span><span class="hidem">SkyBlock Hub</span></button>
+        <span class="crumb">/</span><b style="font-size:15px">${t.icon} ${t.title}</b>
+        <div class="spacer"></div>
+        ${livePill()}
+        <button class="btn icon" id="pauseBtn" title="Auto-Update pausieren">${S.paused ? '▶' : '⏸'}</button>
+        <button class="btn primary" id="refreshBtn" title="Jetzt aktualisieren">↻<span class="hidem"> Aktualisieren</span></button>
+      </div>
+      <nav class="tabs" id="tabs"></nav>`;
+    renderTabs();
+  }
+  tick();
+}
+function renderTabs(){
+  const el = $('#tabs'); if (!el) return;
+  const t = TOOL[S.tool];
+  const counts = S.rows.length ? {flips: filteredFlips(true).length, crafts: filteredCrafts(true).length, watch: S.watch.length} : {watch: S.watch.length};
+  el.innerHTML = t.tabs.map(x => `<button class="${S.tab === x.id ? 'on' : ''}" data-tab="${x.id}">${x.icon} ${x.label}${counts[x.id] ? `<span class="n">${counts[x.id]}</span>` : ''}</button>`).join('');
 }
 function tick(){
-  const ring = $('#ring'), fg = $('#ringfg'), C = 50.27;
-  let frac = 0, txt;
-  if (S.state === 'err'){ txt = '<b>Offline</b> · neuer Versuch' + (S.nextAt ? ' in ' + Math.max(0, Math.ceil((S.nextAt - Date.now())/1000)) + ' s' : ''); }
-  else if (S.state === 'load' && !S.lastUpdated){ txt = 'Lade Daten…'; }
+  const fg = $('#ringfg'), ring = $('#ring'), st = $('#statusTxt'), C = 50.27;
+  if (!fg) return;
+  let frac = 1, txt;
+  if (S.state === 'err') txt = '<b>Offline</b> · neuer Versuch' + (S.nextAt ? ' in ' + Math.max(0, Math.ceil((S.nextAt - Date.now())/1000)) + ' s' : '');
+  else if (!S.lastUpdated) txt = 'Lade Daten…';
   else {
-    const age = S.lastUpdated ? ago(Date.now() - S.lastUpdated) : '–';
+    const age = ago(Date.now() - S.lastUpdated);
     if (S.paused) txt = '<b>Pausiert</b> · Stand vor ' + age;
-    else {
-      const left = Math.max(0, (S.nextAt - Date.now())/1000);
-      frac = 1 - left / S.set.interval;
-      txt = '<b>Live</b> · Stand vor ' + age;
-    }
+    else { frac = 1 - Math.max(0, (S.nextAt - Date.now())/1000) / S.set.interval; txt = '<b>Live</b> · Stand vor ' + age; }
   }
   ring.setAttribute('class', 'ring ' + (S.paused ? 'pause' : S.state));
-  fg.style.strokeDashoffset = (C * (1 - Math.min(1, Math.max(0, S.state === 'ok' ? frac : 1)))).toFixed(2);
-  $('#statusTxt').innerHTML = txt;
-  $('#footInfo').textContent = S.polls ? `${S.polls} Abrufe · ${fmt(histPoints())} Datenpunkte` : '';
+  fg.style.strokeDashoffset = (C * (1 - Math.min(1, Math.max(0, frac)))).toFixed(2);
+  st.innerHTML = txt;
 }
 
-function go(id){
-  if (!MOD[id]) return;
-  S.page = id; history.replaceState(null, '', '#' + id);
-  $('#side').classList.remove('open');
-  render(true); window.scrollTo({top:0});
-}
-
-function render(force){
+/* Hauptbereich neu zeichnen – ohne Fokusverlust im Suchfeld */
+function renderMain(force){
   const a = document.activeElement;
-  // Nicht neu zeichnen, während eine Zahl im Filter getippt wird
-  if (!force && a && a.dataset && a.dataset.set && a.matches('input[type=number]')){ renderNav(); return; }
+  if (!force && a && a.closest && a.closest('#view') && a.matches('input:not(#search), select')) return;   // nicht beim Tippen stören
   const wasSearch = a && a.id === 'search', pos = wasSearch ? a.selectionStart : 0;
-  const m = MOD[S.page];
-  $('#pageTitle').textContent = m.title;
-  $('#pageDesc').textContent = m.desc || '';
-  document.title = m.title + ' · SkyBlock Hub';
-  renderNav();
-  if (m.soon) renderSoon(m);
-  else if (m.id !== 'settings' && m.id !== 'home' && !S.rows.length) $('#view').innerHTML = '<div class="empty">⏳ Warte auf die ersten Daten von der Hypixel-API…</div>';
-  else m.render();
+  let html;
+  if (!S.tool) html = pageHub();
+  else {
+    const t = TOOL[S.tool], tab = t.tabs.find(x => x.id === S.tab);
+    document.title = tab.label + ' · ' + t.title;
+    const needsData = !['settings', 'overview', 'watch'].includes(S.tab);
+    html = `<div class="banner" id="banner" style="display:${S.banner ? 'block' : 'none'}">${S.banner}</div>` +
+      (needsData && !S.rows.length ? '<div class="card empty"><b>⏳ Lade Live-Daten…</b>Die Hypixel-API wird abgefragt.</div>' : PAGES[S.tab]());
+  }
+  if (!S.tool) document.title = 'SkyBlock Hub';
+  $('#view').innerHTML = html;
+  if (S.tool) renderTabs();
   if (wasSearch){ const el = $('#search'); if (el){ el.focus(); el.setSelectionRange(pos, pos); } }
 }
 
@@ -518,263 +579,294 @@ function flash(key, v){
 function paginate(tab, rows){
   const ps = S.set.pageSize, pages = Math.max(1, Math.ceil(rows.length / ps));
   let p = S.pageNo[tab] || 0; if (p >= pages) p = pages - 1; S.pageNo[tab] = p;
-  return {slice: rows.slice(p*ps, p*ps + ps), html: `<div class="pager"><span>${NF0.format(rows.length)} Einträge</span><span>Seite ${p+1} von ${pages}
+  return {slice: rows.slice(p*ps, p*ps + ps), html: pages > 1 ? `<div class="pager"><span>${NF0.format(rows.length)} Einträge</span><span>Seite ${p+1} von ${pages}
     <button class="btn sm" data-pg="-1" ${p === 0 ? 'disabled' : ''}>‹</button>
-    <button class="btn sm" data-pg="1" ${p >= pages-1 ? 'disabled' : ''}>›</button></span></div>`};
+    <button class="btn sm" data-pg="1" ${p >= pages-1 ? 'disabled' : ''}>›</button></span></div>` : ''};
 }
-function numField(key, label, step){ return `<div class="f"><label>${label}</label><input type="number" data-set="${key}" value="${S.set[key]}" step="${step || 'any'}" min="0"></div>`; }
-function selField(key, label, opts){
-  return `<div class="f"><label>${label}</label><select data-set="${key}">${opts.map(([v,l]) => `<option value="${v}" ${S.set[key] === v ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`;
-}
-function chk(key, label){ return `<label class="chk"><input type="checkbox" data-set="${key}" ${S.set[key] ? 'checked' : ''}> ${label}</label>`; }
 function bar(v, max){ return `<span class="bar gold">${fmt(v)}<i style="width:${max > 0 ? Math.max(4, v / max * 100).toFixed(0) : 0}%"></i></span>`; }
-
-/* Toolbar: Suche · Strategie · Filter-Panel · Filter-Chips */
-function toolbar(kind){
-  const s = S.set;
-  const presets = kind !== 'market'
-    ? `<div class="seg" title="Strategie: setzt Nachfrage- und Margenfilter">${Object.entries(PRESETS).map(([k,p]) => `<button data-preset="${k}" class="${s.preset === k ? 'on' : ''}">${p.label}</button>`).join('')}<button data-preset="custom" class="${s.preset === 'custom' ? 'on' : ''}" title="Eigene Werte im Filter-Panel">Eigene</button></div>` : '';
-  const groups = [];
-  if (kind === 'market'){
-    groups.push(`<div class="fgroup"><h4>Anzeige</h4><div class="fields">${chk('marketLiquidOnly', 'Nur gefragte Items zeigen')}</div></div>`);
-  } else {
-    groups.push(`<div class="fgroup"><h4>💼 Kapital</h4><div class="fields">${numField('budget', 'Budget (Coins)', 100000)}${numField('share', 'Dein Anteil am Volumen %', 1)}</div></div>`);
-  }
-  groups.push(`<div class="fgroup"><h4>📈 Nachfrage (beide Seiten)</h4><div class="fields">${numField('minVolH', 'Min. Stück pro Stunde', 50)}${numField('minTurnH', 'Min. Umsatz/h (Coins)', 500000)}${numField('minBalance', 'Min. Ausgeglichenheit %', 5)}</div></div>`);
-  if (kind === 'crafts'){
-    groups.push(`<div class="fgroup"><h4>🔨 Craft</h4><div class="fields">
-      ${selField('craftBuy', 'Zutaten kaufen per', [['order','Buy-Order'],['insta','Instabuy']])}
-      ${selField('craftSell', 'Ergebnis verkaufen per', [['offer','Sell-Offer'],['insta','Instasell']])}
-      ${numField('craftMinProfit', 'Min. Gewinn/Craft', 100)}${numField('craftMinPct', 'Min. Marge %', 0.5)}</div></div>`);
-  }
-  if (kind === 'flips' || kind === 'npc'){
-    groups.push(`<div class="fgroup"><h4>💰 Gewinn</h4><div class="fields">${numField('minProfit', 'Min. Gewinn/Stk', 0.1)}${numField('minPct', 'Min. Marge %', 0.5)}${numField('maxPct', 'Max. Marge %', 10)}${chk('hideRisky', 'Riskante Items ausblenden ⚠')}</div></div>`);
-  }
-  if (kind === 'crafts') groups.push(`<div class="fgroup"><h4>🛡 Sicherheit</h4><div class="fields">${numField('maxPct', 'Max. Marge %', 10)}${chk('hideRisky', 'Riskante ausblenden ⚠')}</div></div>`);
-  const chips = [];
-  if (kind !== 'market') chips.push(`Budget <b>${fmt(s.budget)}</b>`);
-  if (kind !== 'market' || s.marketLiquidOnly) chips.push(`≥ <b>${fmt(s.minVolH)}</b> Stk/h`, `≥ <b>${fmt(s.minTurnH)}</b> Umsatz/h`, `Balance ≥ <b>${s.minBalance} %</b>`);
-  if (kind === 'flips') chips.push(`Marge <b>${NF1.format(s.minPct)}–${NF0.format(s.maxPct)} %</b>`);
-  if (kind === 'crafts') chips.push(`Marge ≥ <b>${NF1.format(s.craftMinPct)} %</b>`, `${s.craftBuy === 'insta' ? 'Instabuy' : 'Buy-Order'} → ${s.craftSell === 'insta' ? 'Instasell' : 'Sell-Offer'}`);
-  if (kind !== 'market' && s.hideRisky) chips.push('ohne ⚠ Risiko');
-  return `<div class="toolbar">
-      <div class="searchbox"><span class="mut">🔍</span><input id="search" placeholder="Item suchen…" value="${esc(S.search)}" autocomplete="off"><kbd>/</kbd></div>
-      ${presets}
-      <div class="spacer"></div>
-      <button class="btn" data-act="filters">⚙ Filter ${S.filterOpen ? '▴' : '▾'}</button>
-    </div>
-    <div class="filterpanel ${S.filterOpen ? 'open' : ''}">${groups.join('')}</div>
-    <div class="chips">${chips.map(c => `<span class="chip">${c}</span>`).join('')}</div>`;
-}
-
 function spark(id, W=90, H=24, n=120){
   const h = S.hist[id]; if (!h || h.t.length < 2) return '<span class="mut">–</span>';
   const vals = h.s.slice(-n).filter(v => v > 0);
   if (vals.length < 2) return '<span class="mut">–</span>';
   const mn = Math.min(...vals), mx = Math.max(...vals);
   const pts = vals.map((v, i) => (i/(vals.length-1)*W).toFixed(1) + ',' + (mx === mn ? H/2 : H - 2 - (v-mn)/(mx-mn)*(H-4)).toFixed(1)).join(' ');
-  const up = vals[vals.length-1] >= vals[0], col = up ? '#3fcf8e' : '#ef6b6b';
+  const col = vals[vals.length-1] >= vals[0] ? '#3fcf8e' : '#ef6b6b';
   return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${col}" stroke-width="1.6" stroke-linejoin="round"/></svg>`;
 }
 
-/* =========================================================
-   Startseite
-   ========================================================= */
-function renderHome(){
-  const hasData = S.rows.length > 0;
-  const flips = hasData ? filteredFlips(true).sort((a,b) => b.pph - a.pph) : [];
-  const crafts = hasData ? filteredCrafts(true).sort((a,b) => b.pph - a.pph) : [];
-  const liq = hasData ? S.rows.filter(liquid) : [];
-  const movers = liq.filter(r => r.d1h != null).sort((a,b) => Math.abs(b.d1h) - Math.abs(a.d1h)).slice(0, 6);
-  const activeAlerts = S.alerts.length;
-  const hour = new Date().getHours();
-  const greet = hour < 11 ? 'Guten Morgen' : hour < 18 ? 'Hallo' : 'Guten Abend';
-
-  const mini = (list, fn, emptyTxt) => list.length ? list.map(fn).join('') : `<div class="empty">${emptyTxt}</div>`;
-  const flipItem = r => `<div class="it" data-open="${esc(r.id)}">${icon(r.id, r.name)}<div class="grow"><div class="nm">${esc(r.name)}</div><div class="sub">${price(r.buyAt)} → ${price(r.sellAt)} · ${fmt(r.perHour)} Stk/h</div></div><div class="val gold">${fmt(r.pph)}<small>${pct(r.marginPct, false)} Marge</small></div></div>`;
-  const craftItem = c => `<div class="it" data-craft="${c.ri}">${icon(c.id, c.name)}<div class="grow"><div class="nm">${c.cnt > 1 ? c.cnt + '× ' : ''}${esc(c.name)}</div><div class="sub">${esc(c.ingredients)}</div></div><div class="val gold">${fmt(c.pph)}<small>${fmt(c.profit)} / Craft</small></div></div>`;
-  const moverItem = r => `<div class="it" data-open="${esc(r.id)}">${icon(r.id, r.name)}<div class="grow"><div class="nm">${esc(r.name)}</div><div class="sub">Instabuy ${price(r.topSell)}</div></div><div>${spark(r.id, 70, 22, 60)}</div><div class="val ${cls(r.d1h)}">${pct(r.d1h)}<small>1 h</small></div></div>`;
-  const watchItem = id => { const r = S.byId[id]; if (!r) return ''; return `<div class="it" data-open="${esc(id)}">${icon(id, r.name)}<div class="grow"><div class="nm">${esc(r.name)}</div><div class="sub">${price(r.topSell)} / ${price(r.topBuy)}</div></div><div class="val ${cls(r.d1h)}">${pct(r.d1h)}<small>1 h</small></div></div>`; };
-
-  $('#view').innerHTML = `
-    <div class="hero"><div><h2>${greet}! 👋</h2><p>${hasData ? `Live-Daten von ${NF0.format(S.rows.length)} Bazaar-Produkten, davon ${NF0.format(liq.length)} gefragt.` : 'Die Live-Daten werden geladen…'}</p></div></div>
-    <div class="kpis">
-      <div class="kpi accent"><div class="l">💰 Bester Flip</div><div class="v">${flips[0] ? fmt(flips[0].pph) + '/h' : '–'}</div><div class="s">${flips[0] ? esc(flips[0].name) : 'keine Daten'}</div></div>
-      <div class="kpi accent"><div class="l">🔨 Bester Craft-Flip</div><div class="v">${crafts[0] ? fmt(crafts[0].pph) + '/h' : '–'}</div><div class="s">${crafts[0] ? esc(crafts[0].name) : 'keine Daten'}</div></div>
-      <div class="kpi"><div class="l">✅ Passende Flips</div><div class="v">${hasData ? NF0.format(flips.length + crafts.length) : '–'}</div><div class="s">${flips.length} Flips · ${crafts.length} Crafts · Strategie ${PRESETS[S.set.preset]?.label || 'Eigene'}</div></div>
-      <div class="kpi"><div class="l">⭐ Watchlist</div><div class="v">${S.watch.length}</div><div class="s">${activeAlerts} Alarm${activeAlerts === 1 ? '' : 'e'} aktiv</div></div>
-    </div>
-    <div class="homegrid">
-      <div class="card mini"><h3>💰 Top Bazaar-Flips <button class="more" data-go="flips">Alle ansehen →</button></h3>${mini(flips.slice(0, 5), flipItem, hasData ? 'Keine Flips mit den aktuellen Filtern.' : 'Lade…')}</div>
-      <div class="card mini"><h3>🔨 Top Craft-Flips <button class="more" data-go="crafts">Alle ansehen →</button></h3>${mini(crafts.slice(0, 5), craftItem, hasData ? 'Keine Craft-Flips mit den aktuellen Filtern.' : 'Lade…')}</div>
-      <div class="card mini"><h3>⚡ Größte Bewegungen (1 h) <button class="more" data-go="market">Markt →</button></h3>${mini(movers, moverItem, hasData ? 'Noch zu wenig Verlauf – nach ein paar Minuten erscheinen hier die stärksten Preisbewegungen.' : 'Lade…')}</div>
-      <div class="card mini"><h3>⭐ Watchlist <button class="more" data-go="watch">Verwalten →</button></h3>${mini(S.watch.slice(0, 6).filter(id => S.byId[id]), watchItem, 'Noch leer – markiere Items mit ☆, um sie hier zu sehen.')}</div>
-    </div>
-    <div class="sectiontitle">Module</div>
-    <div class="modules">${MODULES.filter(m => m.id !== 'home').map(m => `
-      <div class="mod ${m.soon ? 'soon' : ''}" data-go="${m.id}"><span class="tag ${m.soon ? 'soon' : 'live'}">${m.soon ? 'geplant' : m.id === 'settings' ? 'system' : 'live'}</span>
-        <div class="mi">${m.icon}</div><b>${m.title}</b><p>${m.desc}</p></div>`).join('')}
-    </div>`;
+// Eingabe-Komponenten (Filter-Panel & Einstellungen)
+function sliderCtl(key){
+  const c = SLIDERS[key], steps = c.steps, v = S.set[key];
+  let idx = 0, bd = Infinity;
+  steps.forEach((s, i) => { const d = Math.abs(s - v); if (d < bd){ bd = d; idx = i; } });
+  const p = (idx / (steps.length - 1) * 100).toFixed(1);
+  return `<label class="slider"><div class="head"><span>${c.label}</span><b data-out="${key}">${c.f(steps[idx])}</b></div>
+    <input type="range" min="0" max="${steps.length-1}" step="1" value="${idx}" data-slider="${key}" style="--p:${p}%">
+    ${c.hint ? `<small>${c.hint}</small>` : ''}</label>`;
 }
-function renderSoon(m){
-  $('#view').innerHTML = `<div class="placeholder"><div class="big">${m.icon}</div><h2>${m.title}</h2>
-    <p>${m.desc}. Dieses Modul ist vorbereitet und erscheint hier, sobald es gebaut ist. Navigation und Startseite sind schon darauf eingestellt.</p>
-    <div class="row" style="justify-content:center;margin-top:18px"><button class="btn" data-go="home">← Zur Übersicht</button></div></div>`;
+function coinCtl(key, label, quick, hint){
+  return `<div><span class="lbl">${label}</span>
+    <div class="input"><input data-coin="${key}" value="${coinText(S.set[key])}" inputmode="decimal" autocomplete="off" placeholder="z. B. 10m"><span class="unit">Coins</span></div>
+    ${quick ? `<div class="quick">${quick.map(q => `<button data-coinset="${key}:${q}" class="${S.set[key] === q ? 'on' : ''}">${fmt(q)}</button>`).join('')}</div>` : ''}
+    ${hint ? `<small class="mut" style="display:block;font-size:11.5px;margin-top:6px">${hint}</small>` : ''}</div>`;
+}
+function segCtl(key, opts, full){
+  return `<div class="seg ${full ? 'full' : ''}">${opts.map(([v, l]) => `<button data-setv="${key}" data-val="${v}" class="${String(S.set[key]) === String(v) ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+}
+function switchCtl(key, label, sub){
+  return `<label class="switch"><span class="t"><b>${label}</b>${sub ? `<small>${sub}</small>` : ''}</span><input type="checkbox" data-set="${key}" ${S.set[key] ? 'checked' : ''}></label>`;
+}
+function presetSeg(){
+  return `<div class="seg" title="Strategie">${Object.entries(PRESETS).map(([k,p]) => `<button data-preset="${k}" class="${S.set.preset === k ? 'on' : ''}" title="${esc(p.desc)}">${p.label}</button>`).join('')}${S.set.preset === 'custom' ? '<button class="on" data-act="filters">Eigene</button>' : ''}</div>`;
 }
 
-/* =========================================================
-   Bazaar-Seiten
-   ========================================================= */
-function renderFlips(){
-  const rows = sortRows(filteredFlips(), 'flips');
-  const {slice, html} = paginate('flips', rows);
-  const max = Math.max(0, ...slice.map(r => r.pph));
-  const head = `<tr>${th('', '', '', 1)}${th('flips','name','Item',1)}
-    ${th('flips','buyAt','Kaufen → Verkaufen','', 'Grün: deine Buy-Order (höchste + 0,1) · Orange: deine Sell-Offer (niedrigste − 0,1)')}
-    ${th('flips','profit','Gewinn/Stk','', 'Nach ' + NF2.format(S.set.tax) + ' % Bazaar-Steuer')}
-    ${th('flips','perHour','Nachfrage','', 'Gehandelte Stück pro Stunde auf der schwächeren Seite')}
-    ${th('flips','qty','Menge/h','', 'Realistisch: min(Budget, Stundenvolumen × dein Anteil)')}
-    ${th('flips','pph','Profit/h')}
-    ${th('flips','d1h','Trend 1h')}</tr>`;
-  const body = slice.map(r => `<tr data-open="${esc(r.id)}">
-    <td style="width:34px">${starBtn(r.id)}</td>
-    <td class="item">${itemCell(r.id, r.name, `${r.topBuyOrders + r.topSellOrders} Orders am Top-Preis`, r.risk)}</td>
-    <td><div class="pricepair"><span class="b ${flash(r.id+'b', r.buyAt)}">${price(r.buyAt)}</span><span class="s ${flash(r.id+'s', r.sellAt)}">${price(r.sellAt)}</span></div></td>
-    <td><span class="pos">${price(r.profit)}</span><div class="sub">${pct(r.marginPct, false)}</div></td>
-    <td>${fmt(r.perHour)}<div class="sub">Stk/h · ${fmt(r.turnH)} Coins</div></td>
-    <td>${fmt(r.qty)}<div class="sub">${fmt(r.qty * r.buyAt)} Einsatz</div></td>
-    <td>${bar(r.pph, max)}</td>
-    <td class="${cls(r.d1h)}">${pct(r.d1h)}</td></tr>`).join('');
-  $('#view').innerHTML = toolbar('flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || '<tr><td colspan="8" class="empty">Keine Flips mit diesen Filtern – probier die Strategie „Aggressiv".</td></tr>'}</tbody></table>${html}</div>
-    <p class="hint">💡 Buy-Order zum grünen Preis setzen, nach dem Füllen Sell-Offer zum orangen Preis. Profit/h ist eine Schätzung aus dem 7-Tage-Volumen. Klick auf eine Zeile für Verlauf & Orderbuch.</p>`;
-}
-
-function renderCrafts(){
-  const rows = sortRows(filteredCrafts(), 'crafts');
-  const {slice, html} = paginate('crafts', rows);
-  const max = Math.max(0, ...slice.map(c => c.pph));
+/* Toolbar über jeder Liste: Suche · Strategie · Filter */
+function toolbar(kind, count, noun){
   const s = S.set;
-  const head = `<tr>${th('', '', '', 1)}${th('crafts','name','Rezept',1)}
-    ${th('crafts','cost','Kosten → Erlös','', 'Kosten der Zutaten · Erlös nach Steuer')}
-    ${th('crafts','profit','Gewinn/Craft')}
-    ${th('crafts','craftsH','Crafts/h','', 'Was der Markt pro Stunde hergibt · Engpass-Item')}
-    ${th('crafts','qty','Für dich/h','', 'Realistisch: min(Budget, Markt × dein Anteil)')}
-    ${th('crafts','pph','Profit/h')}</tr>`;
-  const body = slice.map(c => `<tr data-craft="${c.ri}">
-    <td style="width:34px">${starBtn(c.id)}</td>
-    <td class="item">${itemCell(c.id, (c.cnt > 1 ? c.cnt + '× ' : '') + c.name, esc(c.ingredients), c.risk)}</td>
-    <td><div class="pricepair"><span class="b">${fmt(c.cost)}</span><span class="s">${fmt(c.revenue)}</span></div></td>
-    <td><span class="${cls(c.profit)}">${fmt(c.profit)}</span><div class="sub">${pct(c.marginPct, false)} · sofort ${fmt(c.fastProfit)}</div></td>
-    <td>${fmt(c.craftsH)}<div class="sub">Engpass: ${esc(c.limitingName)}</div></td>
-    <td>${fmt(c.qty)}<div class="sub">${fmt(c.qty * c.cost)} Einsatz</div></td>
-    <td>${bar(c.pph, max)}</td></tr>`).join('');
-  $('#view').innerHTML = toolbar('crafts') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || '<tr><td colspan="7" class="empty">Keine Craft-Flips mit diesen Filtern.</td></tr>'}</tbody></table>${html}</div>
-    <p class="hint">💡 Nur Rezepte, bei denen Ergebnis <b>und alle Zutaten</b> im Bazaar gehandelt und gefragt sind – kein Auction House. Aktuell: ${s.craftBuy === 'insta' ? 'Instabuy' : 'Buy-Order'} → craften → ${s.craftSell === 'insta' ? 'Instasell' : 'Sell-Offer'}. ${NF0.format(S.crafts.length)} von ${NF0.format(RECIPES.length)} Rezepten sind komplett über den Bazaar machbar. Rezepte musst du über Collections freigeschaltet haben.</p>`;
+  const parts = [`<b>${NF0.format(count)}</b> ${noun}`];
+  if (kind !== 'market') parts.push(`Budget <b>${fmt(s.budget)}</b>`);
+  if (kind !== 'market' || s.marketLiquidOnly) parts.push(`ab <b>${fmt(s.minVolH)}</b> Stk/h`, `ab <b>${fmt(s.minTurnH)}</b> Umsatz/h`);
+  if (kind === 'crafts') parts.push(`${s.craftBuy === 'insta' ? 'Instabuy' : 'Buy-Order'} → ${s.craftSell === 'insta' ? 'Instasell' : 'Sell-Offer'}`);
+  return `<div class="toolbar">
+      <div class="input ${S.search ? 'has' : ''}"><span class="mut">🔍</span><input id="search" placeholder="Item suchen…" value="${esc(S.search)}" autocomplete="off"><button class="clear" data-act="clearsearch" title="Suche leeren">✕</button></div>
+      ${kind !== 'market' ? presetSeg() : ''}
+      <div class="spacer"></div>
+      <button class="btn" data-act="filters">⚙ Filter</button>
+    </div>
+    <div class="summary">${parts.join('<span class="dot">·</span>')}</div>`;
 }
 
-function renderNpc(){
-  const rows = sortRows(S.rows.filter(r => r.npc > 0 && r.npcOrder > 0 && liquid(r) && matchSearch(r)), 'npc');
-  const {slice, html} = paginate('npc', rows);
-  const max = Math.max(0, ...slice.map(r => r.npcTotal));
-  const head = `<tr>${th('', '', '', 1)}${th('npc','name','Item',1)}
-    ${th('npc','npc','NPC zahlt')}
-    ${th('npc','npcOrder','Per Buy-Order','', 'NPC-Preis − deine Buy-Order')}
-    ${th('npc','npcInsta','Per Instabuy','', 'NPC-Preis − Instabuy')}
-    ${th('npc','perHour','Nachfrage')}
-    ${th('npc','npcTotal','Gewinn/Tag','', 'Gewinn/Stk × min(Budget, Tagesvolumen × Anteil)')}</tr>`;
-  const body = slice.map(r => `<tr data-open="${esc(r.id)}">
-    <td style="width:34px">${starBtn(r.id)}</td>
-    <td class="item">${itemCell(r.id, r.name, '', r.risk)}</td>
-    <td>${price(r.npc)}</td>
-    <td><span class="${cls(r.npcOrder)}">${price(r.npcOrder)}</span><div class="sub">kaufen @ ${price(r.buyAt)}</div></td>
-    <td><span class="${cls(r.npcInsta)}">${price(r.npcInsta)}</span><div class="sub">kaufen @ ${price(r.topSell)}</div></td>
-    <td>${fmt(r.perHour)}<div class="sub">Stk/h</div></td>
-    <td>${bar(r.npcTotal, max)}</td></tr>`).join('');
-  $('#view').innerHTML = toolbar('npc') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || '<tr><td colspan="7" class="empty">Aktuell keine profitablen, gefragten NPC-Flips.</td></tr>'}</tbody></table>${html}</div>
-    <p class="hint">💡 Hypixel begrenzt, wie viele Coins du pro Tag durch NPC-Verkäufe verdienen kannst – prüfe dein Limit im Spiel.</p>`;
+/* =========================================================
+   Filter-Panel (rechts ausfahrend)
+   ========================================================= */
+function openDrawer(){ S.drawer = true; renderDrawer(); $('#drawer').classList.add('on'); $('#scrim').classList.add('on'); }
+function closeDrawer(){ S.drawer = false; const d = $('#drawer'); if (d) d.classList.remove('on'); const sc = $('#scrim'); if (sc) sc.classList.remove('on'); }
+function renderDrawer(){
+  const kind = S.tab, secs = [];
+  if (kind === 'market'){
+    secs.push(`<div class="dsec"><h4>Anzeige</h4>${switchCtl('marketLiquidOnly', 'Nur gefragte Items', 'Blendet Items mit wenig Handel aus')}</div>`);
+  } else {
+    secs.push(`<div class="dsec"><h4>Strategie</h4><div class="seg full">${Object.entries(PRESETS).map(([k,p]) => `<button data-preset="${k}" class="${S.set.preset === k ? 'on' : ''}">${p.label}</button>`).join('')}</div>
+      <small class="mut" style="display:block;font-size:12px">${S.set.preset === 'custom' ? 'Eigene Einstellungen – wähle eine Strategie, um zurückzusetzen.' : esc(PRESETS[S.set.preset].desc)}</small></div>`);
+    secs.push(`<div class="dsec"><h4>Kapital</h4>${coinCtl('budget', 'Dein Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b')}${sliderCtl('share')}</div>`);
+  }
+  secs.push(`<div class="dsec"><h4>Nachfrage <span style="text-transform:none;letter-spacing:0;font-weight:400">· damit sich Orders schnell füllen</span></h4>${sliderCtl('minVolH')}${sliderCtl('minTurnH')}${sliderCtl('minBalance')}</div>`);
+  if (kind === 'crafts'){
+    secs.push(`<div class="dsec"><h4>Craft-Ablauf</h4>
+      <div><span class="lbl">Zutaten kaufen per</span>${segCtl('craftBuy', [['order','Buy-Order'],['insta','Instabuy']], true)}</div>
+      <div><span class="lbl">Ergebnis verkaufen per</span>${segCtl('craftSell', [['offer','Sell-Offer'],['insta','Instasell']], true)}</div></div>`);
+    secs.push(`<div class="dsec"><h4>Gewinn</h4>${sliderCtl('craftMinPct')}${coinCtl('craftMinProfit', 'Min. Gewinn pro Craft')}${sliderCtl('maxPct')}</div>`);
+  } else if (kind !== 'market'){
+    secs.push(`<div class="dsec"><h4>Gewinn</h4>${sliderCtl('minPct')}${coinCtl('minProfit', 'Min. Gewinn pro Stück')}${sliderCtl('maxPct')}</div>`);
+  }
+  if (kind !== 'market') secs.push(`<div class="dsec"><h4>Sicherheit</h4>${switchCtl('hideRisky', 'Riskante Items ausblenden', 'Preis-Ausreißer, Manipulation, kaum Handel')}</div>`);
+  $('#drawer').innerHTML = `<div class="dh"><h2>Filter</h2><div class="spacer"></div><button class="btn icon ghost" data-act="closedrawer" title="Schließen">✕</button></div>
+    <div class="db">${secs.join('')}</div>
+    <div class="df"><button class="btn" data-preset="balanced">Zurücksetzen</button><button class="btn primary" data-act="closedrawer">Fertig</button></div>`;
 }
 
-function renderMarket(){
-  const rows = sortRows(S.rows.filter(r => matchSearch(r) && (!S.set.marketLiquidOnly || liquid(r))), 'market');
-  const {slice, html} = paginate('market', rows);
-  const head = `<tr>${th('', '', '', 1)}${th('market','name','Item',1)}
-    ${th('market','topSell','Instabuy','', 'Niedrigste Sell-Offer – das zahlst du beim Sofortkauf')}
-    ${th('market','topBuy','Instasell','', 'Höchste Buy-Order – das bekommst du beim Sofortverkauf')}
-    ${th('market','spreadPct','Spread')}
-    ${th('market','d1h','1 h')}${th('market','d24h','24 h')}
-    ${th('market','wVol','Volumen/Woche')}
-    ${th('', '', 'Verlauf')}</tr>`;
-  const body = slice.map(r => `<tr data-open="${esc(r.id)}">
-    <td style="width:34px">${starBtn(r.id)}</td>
-    <td class="item">${itemCell(r.id, r.name, liquid(r) ? '<span class="pos">● gefragt</span>' : '', r.risk)}</td>
-    <td class="${flash(r.id+'S', r.topSell)}">${price(r.topSell)}</td>
-    <td class="${flash(r.id+'B', r.topBuy)}">${price(r.topBuy)}</td>
-    <td class="mut">${pct(r.spreadPct, false)}</td>
-    <td class="${cls(r.d1h)}">${pct(r.d1h)}</td><td class="${cls(r.d24h)}">${pct(r.d24h)}</td>
-    <td>${fmt(r.wVol)}<div class="sub">${fmt(r.wBuy)} / ${fmt(r.wSell)}</div></td>
-    <td>${spark(r.id)}</td></tr>`).join('');
-  $('#view').innerHTML = toolbar('market') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || '<tr><td colspan="9" class="empty">Nichts gefunden.</td></tr>'}</tbody></table>${html}</div>`;
-}
-
-function renderWatch(){
-  const cards = S.watch.map(id => {
-    const r = S.byId[id];
-    if (!r) return `<div class="wcard"><div class="top">${icon(id)}<b>${esc(pretty(id))}</b><div class="spacer"></div>${starBtn(id)}</div><p class="mut">Aktuell nicht im Bazaar.</p></div>`;
-    const n = S.alerts.filter(a => a.id === id).length;
-    return `<div class="wcard" data-open="${esc(id)}">
-      <div class="top">${icon(id, r.name)}<div style="min-width:0;flex:1"><b style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name)}</b><span class="mut" style="font-size:11.5px">${n ? '🔔 ' + n + ' Alarm' + (n > 1 ? 'e' : '') : 'kein Alarm'}</span></div>${starBtn(id)}</div>
-      <div class="prices"><div><div class="l">Instabuy</div><div class="v">${price(r.topSell)}</div></div><div><div class="l">Instasell</div><div class="v">${price(r.topBuy)}</div></div></div>
-      ${spark(id, 240, 40, 180)}
-      <div class="foot"><span>1 h <b class="${cls(r.d1h)}">${pct(r.d1h)}</b></span><span>24 h <b class="${cls(r.d24h)}">${pct(r.d24h)}</b></span><span>Flip <b class="${cls(r.profit)}">${price(r.profit)}</b></span></div>
-    </div>`;
-  }).join('');
-  const al = S.alerts.map((a, i) => {
-    const r = S.byId[a.id], c = CONDS[a.cond];
-    return `<tr data-open="${esc(a.id)}"><td class="item">${itemCell(a.id, r ? r.name : pretty(a.id))}</td><td class="l" style="font-family:Inter,sans-serif">${c ? c.label : a.cond} <b>${price(a.value)}</b></td>
-      <td>${r && c ? price(c.get(r)) : '–'}</td><td class="mut" style="font-family:Inter,sans-serif">${a.last ? 'ausgelöst vor ' + ago(Date.now() - a.last) : 'wartet'}</td>
-      <td><button class="btn sm danger" data-delalert="${i}">Entfernen</button></td></tr>`;
-  }).join('');
-  $('#view').innerHTML = `
-    ${S.watch.length ? `<div class="wgrid">${cards}</div>` : '<div class="card empty">⭐ Noch nichts auf der Watchlist. Klick bei einem Item auf ☆, um es hier zu verfolgen.</div>'}
-    <div class="sectiontitle">🔔 Preis-Alarme</div>
-    <div class="tablewrap"><table><thead><tr><th class="l nosort">Item</th><th class="l nosort">Bedingung</th><th class="nosort">Aktuell</th><th class="nosort">Status</th><th class="nosort"></th></tr></thead>
-    <tbody>${al || '<tr><td colspan="5" class="empty">Keine Alarme. Öffne ein Item und lege im Detailfenster einen Alarm an.</td></tr>'}</tbody></table></div>`;
-}
-
-function renderSettings(){
-  const notif = ('Notification' in window) ? Notification.permission : 'nicht unterstützt';
-  const notifTxt = {granted:'erlaubt ✓', denied:'blockiert', default:'noch nicht gefragt'}[notif] || notif;
-  $('#view').innerHTML = `<div class="settings">
-    <div class="card"><h3>💼 Kapital & Steuer</h3>
-      <div class="fields">${numField('budget', 'Budget (Coins)', 100000)}${numField('tax', 'Bazaar-Steuer %', 0.125)}${numField('share', 'Dein Anteil am Volumen %', 1)}</div>
-      <p>Standard-Steuer 1,25 %. Mit dem Community-Shop-Upgrade „Bazaar Flipper" ist sie niedriger – trag deinen echten Wert ein. Der Volumen-Anteil bestimmt, wie viel vom Stundenvolumen du realistisch abbekommst.</p></div>
-    <div class="card"><h3>📈 Nachfrage-Filter</h3>
-      <div class="fields">${numField('minVolH', 'Min. Stück pro Stunde', 50)}${numField('minTurnH', 'Min. Umsatz/h (Coins)', 500000)}${numField('minBalance', 'Min. Ausgeglichenheit %', 5)}</div>
-      <p>Gilt für Flips, Craft-Flips (Ergebnis <b>und</b> jede Zutat) und NPC-Flips. Ein Item muss auf beiden Seiten genug gehandelt werden, sonst füllt sich eine deiner Orders nur langsam.</p></div>
-    <div class="card"><h3>🔄 Aktualisierung</h3>
-      <div class="fields">${numField('interval', 'Intervall (Sekunden)', 5)}${numField('pageSize', 'Zeilen pro Seite', 10)}</div>
-      <p>Hypixel aktualisiert den Bazaar ca. alle 20 Sekunden. In Hintergrund-Tabs drosselt der Browser Timer – beim Zurückkehren wird sofort aktualisiert.</p></div>
-    <div class="card"><h3>🔔 Benachrichtigungen</h3>
-      <div class="fields">${chk('sound', 'Ton bei Alarm')}</div>
-      <p>Desktop-Benachrichtigungen: <b>${notifTxt}</b>. Falls blockiert, erscheinen Alarme trotzdem unten rechts mit Ton.</p>
-      <div class="row"><button class="btn" data-act="notif">Benachrichtigungen erlauben</button><button class="btn" data-act="test">Test-Alarm</button></div></div>
-    <div class="card"><h3>🗄 Verlauf</h3>
-      <div class="fields">${numField('retentionH', 'Aufbewahrung (Stunden)', 1)}</div>
-      <p>${fmt(histPoints())} Datenpunkte für ${NF0.format(Object.keys(S.hist).length)} Items, lokal im Browser gespeichert${DB.db ? '' : ' – <b class="neg">IndexedDB nicht verfügbar, Verlauf nur bis zum Neuladen</b>'}. Letzte Stunde in voller Auflösung, älter im 5-Minuten-Raster.</p>
-      <div class="row"><button class="btn" data-act="export">Als JSON exportieren</button><button class="btn danger" data-act="clear">Verlauf löschen</button></div></div>
-    <div class="card"><h3>🌐 Datenquelle</h3>
-      <p style="margin-top:0">Offizielle Hypixel-API (kein Key nötig). Rezepte: NotEnoughUpdates-Repo, ${NF0.format(RECIPES.length)} Crafting-Rezepte eingebettet.</p>
-      <p>${S.polls} Abrufe in dieser Sitzung · läuft seit ${ago(Date.now() - S.sessionStart)}.</p>
-      <div class="row"><button class="btn" data-act="items">Item-Namen neu laden</button><button class="btn" data-act="reset">Alles zurücksetzen</button></div></div>
+/* =========================================================
+   Seite: Startbildschirm (Tool-Auswahl)
+   ========================================================= */
+function pageHub(){
+  const has = S.rows.length > 0;
+  const flips = has ? filteredFlips(true) : [], crafts = has ? filteredCrafts(true) : [];
+  const best = Math.max(0, ...flips.map(r => r.pph), ...crafts.map(c => c.pph));
+  const stats = {
+    bazaar: [['Bester Flip', has ? fmt(best) + '/h' : '…'], ['Passende Flips', has ? NF0.format(flips.length + crafts.length) : '…'], ['Watchlist', S.watch.length]],
+  };
+  return `<div class="hub">
+    <div class="hubhead"><div class="coin">S</div><h1>SkyBlock Hub</h1><p>Wähle ein Tool</p></div>
+    <div class="toolgrid">${TOOLS.map(t => `
+      <div class="tool" data-nav="${t.id}">
+        <div class="ti">${t.icon}</div><h2>${t.title}</h2><p>${t.desc}</p>
+        ${stats[t.id] ? `<div class="tstats">${stats[t.id].map(([l,v]) => `<div><small>${l}</small><b>${v}</b></div>`).join('')}</div>` : ''}
+        <div class="go"><span class="live"><i></i>${S.state === 'err' ? 'offline' : 'Live-Daten'}</span><span class="btn primary">Öffnen →</span></div>
+      </div>`).join('')}
+    </div>
+    <p class="disclaimer">Inoffizielles Fan-Projekt – nicht mit Hypixel oder Mojang verbunden. Daten: offizielle Hypixel-API.</p>
   </div>`;
 }
 
 /* =========================================================
+   Bazaar-Seiten (geben HTML zurück)
+   ========================================================= */
+const PAGES = {
+  overview(){
+    const flips = filteredFlips(true).sort((a,b) => b.pph - a.pph);
+    const crafts = filteredCrafts(true).sort((a,b) => b.pph - a.pph);
+    const liq = S.rows.filter(liquid);
+    const movers = liq.filter(r => r.d1h != null).sort((a,b) => Math.abs(b.d1h) - Math.abs(a.d1h)).slice(0, 5);
+    const has = S.rows.length > 0;
+    const mini = (list, fn, emptyTxt) => list.length ? list.map(fn).join('') : `<div class="empty">${emptyTxt}</div>`;
+    const flipItem = r => `<div class="it" data-open="${esc(r.id)}">${icon(r.id, r.name)}<div class="grow"><div class="nm">${esc(r.name)}</div><div class="sub">${price(r.buyAt)} → ${price(r.sellAt)} · ${fmt(r.perHour)} Stk/h</div></div><div class="val gold">${fmt(r.pph)}/h<small>${pct(r.marginPct, false)} Marge</small></div></div>`;
+    const craftItem = c => `<div class="it" data-craft="${c.ri}">${icon(c.id, c.name)}<div class="grow"><div class="nm">${c.cnt > 1 ? c.cnt + '× ' : ''}${esc(c.name)}</div><div class="sub">${esc(c.ingredients)}</div></div><div class="val gold">${fmt(c.pph)}/h<small>${fmt(c.profit)} pro Craft</small></div></div>`;
+    const moverItem = r => `<div class="it" data-open="${esc(r.id)}">${icon(r.id, r.name)}<div class="grow"><div class="nm">${esc(r.name)}</div><div class="sub">Instabuy ${price(r.topSell)}</div></div><div>${spark(r.id, 70, 22, 60)}</div><div class="val ${cls(r.d1h)}">${pct(r.d1h)}<small>1 h</small></div></div>`;
+    const watchItem = id => { const r = S.byId[id]; return r ? `<div class="it" data-open="${esc(id)}">${icon(id, r.name)}<div class="grow"><div class="nm">${esc(r.name)}</div><div class="sub">${price(r.topSell)} / ${price(r.topBuy)}</div></div><div class="val ${cls(r.d1h)}">${pct(r.d1h)}<small>1 h</small></div></div>` : ''; };
+    return `
+      <div class="kpis">
+        <div class="kpi accent"><div class="l">💰 Bester Flip</div><div class="v">${flips[0] ? fmt(flips[0].pph) + '/h' : '–'}</div><div class="s">${flips[0] ? esc(flips[0].name) : has ? 'nichts passend' : 'lade…'}</div></div>
+        <div class="kpi accent"><div class="l">🔨 Bester Craft-Flip</div><div class="v">${crafts[0] ? fmt(crafts[0].pph) + '/h' : '–'}</div><div class="s">${crafts[0] ? esc(crafts[0].name) : has ? 'nichts passend' : 'lade…'}</div></div>
+        <div class="kpi"><div class="l">✅ Gefragte Items</div><div class="v">${has ? NF0.format(liq.length) : '–'}</div><div class="s">von ${NF0.format(S.rows.length)} Bazaar-Produkten</div></div>
+        <div class="kpi"><div class="l">🎯 Strategie</div><div class="v" style="font-family:Inter,sans-serif;font-size:20px">${PRESETS[S.set.preset]?.label || 'Eigene'}</div><div class="s">Budget ${fmt(S.set.budget)} · <a href="#" data-act="filters" style="color:var(--gold);text-decoration:none">ändern</a></div></div>
+      </div>
+      <div class="grid2">
+        <div class="card mini"><h3>💰 Top Flips <button class="more" data-tab="flips">Alle ${flips.length} →</button></h3>${mini(flips.slice(0, 5), flipItem, has ? 'Keine Flips mit der aktuellen Strategie.' : 'Lade…')}</div>
+        <div class="card mini"><h3>🔨 Top Craft-Flips <button class="more" data-tab="crafts">Alle ${crafts.length} →</button></h3>${mini(crafts.slice(0, 5), craftItem, has ? 'Keine Craft-Flips mit der aktuellen Strategie.' : 'Lade…')}</div>
+        <div class="card mini"><h3>⚡ Größte Bewegungen (1 h) <button class="more" data-tab="market">Markt →</button></h3>${mini(movers, moverItem, has ? 'Noch zu wenig Verlauf – nach ein paar Minuten erscheinen hier die stärksten Preisbewegungen.' : 'Lade…')}</div>
+        <div class="card mini"><h3>⭐ Watchlist <button class="more" data-tab="watch">Verwalten →</button></h3>${mini(S.watch.filter(id => S.byId[id]).slice(0, 5), watchItem, 'Noch leer – markiere Items mit ☆.')}</div>
+      </div>`;
+  },
+
+  flips(){
+    const rows = sortRows(filteredFlips(), 'flips');
+    const {slice, html} = paginate('flips', rows);
+    const max = Math.max(0, ...slice.map(r => r.pph));
+    const head = `<tr>${th('', '', '', 1)}${th('flips','name','Item',1)}
+      ${th('flips','buyAt','Kaufen → Verkaufen','', 'Grün: deine Buy-Order (höchste + 0,1) · Orange: deine Sell-Offer (niedrigste − 0,1)')}
+      ${th('flips','profit','Gewinn/Stk','', 'Nach ' + NF2.format(S.set.tax) + ' % Bazaar-Steuer')}
+      ${th('flips','perHour','Nachfrage','', 'Gehandelte Stück pro Stunde auf der schwächeren Seite')}
+      ${th('flips','qty','Menge/h','', 'Realistisch: min(Budget, Stundenvolumen × dein Anteil)')}
+      ${th('flips','pph','Profit/h')}${th('flips','d1h','Trend 1h')}</tr>`;
+    const body = slice.map(r => `<tr data-open="${esc(r.id)}">
+      <td style="width:36px">${starBtn(r.id)}</td>
+      <td class="item">${itemCell(r.id, r.name, `${r.topBuyOrders + r.topSellOrders} Orders am Top-Preis`, r.risk)}</td>
+      <td><div class="pricepair"><span class="b ${flash(r.id+'b', r.buyAt)}">${price(r.buyAt)}</span><span class="s ${flash(r.id+'s', r.sellAt)}">${price(r.sellAt)}</span></div></td>
+      <td><span class="pos">${price(r.profit)}</span><div class="sub">${pct(r.marginPct, false)}</div></td>
+      <td>${fmt(r.perHour)}<div class="sub">Stk/h</div></td>
+      <td>${fmt(r.qty)}<div class="sub">${fmt(r.qty * r.buyAt)} Einsatz</div></td>
+      <td>${bar(r.pph, max)}</td>
+      <td class="${cls(r.d1h)}">${pct(r.d1h)}</td></tr>`).join('');
+    return toolbar('flips', rows.length, 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(8, 'Keine Flips gefunden', 'Probier die Strategie „Aggressiv" oder senke die Filter.')}</tbody></table>${html}</div>
+      <p class="hint">💡 Buy-Order zum grünen Preis setzen, nach dem Füllen Sell-Offer zum orangen Preis. Klick auf eine Zeile für Verlauf & Orderbuch.</p>`;
+  },
+
+  crafts(){
+    const rows = sortRows(filteredCrafts(), 'crafts');
+    const {slice, html} = paginate('crafts', rows);
+    const max = Math.max(0, ...slice.map(c => c.pph));
+    const head = `<tr>${th('', '', '', 1)}${th('crafts','name','Rezept',1)}
+      ${th('crafts','cost','Kosten → Erlös','', 'Kosten der Zutaten · Erlös nach Steuer')}
+      ${th('crafts','profit','Gewinn/Craft')}
+      ${th('crafts','craftsH','Crafts/h','', 'Was der Markt pro Stunde hergibt · Engpass-Item')}
+      ${th('crafts','qty','Für dich/h','', 'Realistisch: min(Budget, Markt × dein Anteil)')}
+      ${th('crafts','pph','Profit/h')}</tr>`;
+    const body = slice.map(c => `<tr data-craft="${c.ri}">
+      <td style="width:36px">${starBtn(c.id)}</td>
+      <td class="item">${itemCell(c.id, (c.cnt > 1 ? c.cnt + '× ' : '') + c.name, esc(c.ingredients), c.risk)}</td>
+      <td><div class="pricepair"><span class="b">${fmt(c.cost)}</span><span class="s">${fmt(c.revenue)}</span></div></td>
+      <td><span class="${cls(c.profit)}">${fmt(c.profit)}</span><div class="sub">${pct(c.marginPct, false)} · sofort ${fmt(c.fastProfit)}</div></td>
+      <td>${fmt(c.craftsH)}<div class="sub">Engpass: ${esc(c.limitingName)}</div></td>
+      <td>${fmt(c.qty)}<div class="sub">${fmt(c.qty * c.cost)} Einsatz</div></td>
+      <td>${bar(c.pph, max)}</td></tr>`).join('');
+    return toolbar('crafts', rows.length, 'Craft-Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Keine Craft-Flips gefunden', 'Probier die Strategie „Aggressiv" oder ändere den Craft-Ablauf im Filter.')}</tbody></table>${html}</div>
+      <p class="hint">💡 Nur Rezepte, bei denen Ergebnis <b>und alle Zutaten</b> im Bazaar gehandelt und gefragt sind – kein Auction House. ${NF0.format(S.crafts.length)} von ${NF0.format(RECIPES.length)} Rezepten sind komplett über den Bazaar machbar. Du brauchst das Rezept freigeschaltet (Collection).</p>`;
+  },
+
+  npc(){
+    const rows = sortRows(S.rows.filter(r => r.npc > 0 && r.npcOrder > 0 && liquid(r) && matchSearch(r)), 'npc');
+    const {slice, html} = paginate('npc', rows);
+    const max = Math.max(0, ...slice.map(r => r.npcTotal));
+    const head = `<tr>${th('', '', '', 1)}${th('npc','name','Item',1)}${th('npc','npc','NPC zahlt')}
+      ${th('npc','npcOrder','Per Buy-Order','', 'NPC-Preis − deine Buy-Order')}
+      ${th('npc','npcInsta','Per Instabuy','', 'NPC-Preis − Instabuy')}
+      ${th('npc','perHour','Nachfrage')}
+      ${th('npc','npcTotal','Gewinn/Tag','', 'Gewinn/Stk × min(Budget, Tagesvolumen × Anteil)')}</tr>`;
+    const body = slice.map(r => `<tr data-open="${esc(r.id)}">
+      <td style="width:36px">${starBtn(r.id)}</td>
+      <td class="item">${itemCell(r.id, r.name, '', r.risk)}</td>
+      <td>${price(r.npc)}</td>
+      <td><span class="${cls(r.npcOrder)}">${price(r.npcOrder)}</span><div class="sub">kaufen @ ${price(r.buyAt)}</div></td>
+      <td><span class="${cls(r.npcInsta)}">${price(r.npcInsta)}</span><div class="sub">kaufen @ ${price(r.topSell)}</div></td>
+      <td>${fmt(r.perHour)}<div class="sub">Stk/h</div></td>
+      <td>${bar(r.npcTotal, max)}</td></tr>`).join('');
+    return toolbar('npc', rows.length, 'NPC-Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Aktuell keine NPC-Flips', 'Gerade gibt es keine gefragten Items, die beim NPC mehr bringen.')}</tbody></table>${html}</div>
+      <p class="hint">💡 Hypixel begrenzt, wie viele Coins du pro Tag durch NPC-Verkäufe verdienen kannst – prüfe dein Limit im Spiel.</p>`;
+  },
+
+  market(){
+    const rows = sortRows(S.rows.filter(r => matchSearch(r) && (!S.set.marketLiquidOnly || liquid(r))), 'market');
+    const {slice, html} = paginate('market', rows);
+    const head = `<tr>${th('', '', '', 1)}${th('market','name','Item',1)}
+      ${th('market','topSell','Instabuy','', 'Niedrigste Sell-Offer – das zahlst du beim Sofortkauf')}
+      ${th('market','topBuy','Instasell','', 'Höchste Buy-Order – das bekommst du beim Sofortverkauf')}
+      ${th('market','spreadPct','Spread')}${th('market','d1h','1 h')}${th('market','d24h','24 h')}
+      ${th('market','wVol','Volumen/Woche')}${th('', '', 'Verlauf')}</tr>`;
+    const body = slice.map(r => `<tr data-open="${esc(r.id)}">
+      <td style="width:36px">${starBtn(r.id)}</td>
+      <td class="item">${itemCell(r.id, r.name, liquid(r) ? '<span class="pos">● gefragt</span>' : '', r.risk)}</td>
+      <td class="${flash(r.id+'S', r.topSell)}">${price(r.topSell)}</td>
+      <td class="${flash(r.id+'B', r.topBuy)}">${price(r.topBuy)}</td>
+      <td class="mut">${pct(r.spreadPct, false)}</td>
+      <td class="${cls(r.d1h)}">${pct(r.d1h)}</td><td class="${cls(r.d24h)}">${pct(r.d24h)}</td>
+      <td>${fmt(r.wVol)}<div class="sub">${fmt(r.wBuy)} / ${fmt(r.wSell)}</div></td>
+      <td>${spark(r.id)}</td></tr>`).join('');
+    return toolbar('market', rows.length, 'Produkte') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(9, 'Nichts gefunden', '')}</tbody></table>${html}</div>`;
+  },
+
+  watch(){
+    const cards = S.watch.map(id => {
+      const r = S.byId[id];
+      if (!r) return `<div class="wcard"><div class="top">${icon(id)}<b>${esc(pretty(id))}</b><div class="spacer"></div>${starBtn(id)}</div><p class="mut">${S.rows.length ? 'Aktuell nicht im Bazaar.' : 'Lade…'}</p></div>`;
+      const n = S.alerts.filter(a => a.id === id).length;
+      return `<div class="wcard" data-open="${esc(id)}">
+        <div class="top">${icon(id, r.name)}<div style="min-width:0;flex:1"><b style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name)}</b><span class="mut" style="font-size:12px">${n ? '🔔 ' + n + ' Alarm' + (n > 1 ? 'e' : '') : 'kein Alarm'}</span></div>${starBtn(id)}</div>
+        <div class="prices"><div><div class="l">Instabuy</div><div class="v">${price(r.topSell)}</div></div><div><div class="l">Instasell</div><div class="v">${price(r.topBuy)}</div></div></div>
+        ${spark(id, 240, 40, 180)}
+        <div class="foot"><span>1 h <b class="${cls(r.d1h)}">${pct(r.d1h)}</b></span><span>24 h <b class="${cls(r.d24h)}">${pct(r.d24h)}</b></span><span>Flip <b class="${cls(r.profit)}">${price(r.profit)}</b></span></div>
+      </div>`;
+    }).join('');
+    const al = S.alerts.map((a, i) => {
+      const r = S.byId[a.id], c = CONDS[a.cond];
+      return `<tr data-open="${esc(a.id)}"><td class="item">${itemCell(a.id, r ? r.name : pretty(a.id))}</td><td class="l" style="font-family:Inter,sans-serif">${c ? c.label : a.cond} <b>${price(a.value)}</b></td>
+        <td>${r && c ? price(c.get(r)) : '–'}</td><td class="mut" style="font-family:Inter,sans-serif">${a.last ? 'ausgelöst vor ' + ago(Date.now() - a.last) : 'wartet'}</td>
+        <td><button class="btn sm danger" data-delalert="${i}">Entfernen</button></td></tr>`;
+    }).join('');
+    return `${S.watch.length ? `<div class="wgrid">${cards}</div>` : '<div class="card empty"><b>⭐ Noch nichts auf der Watchlist</b>Klick bei einem Item auf ☆, um es hier zu verfolgen.</div>'}
+      <div class="sectiontitle">🔔 Preis-Alarme</div>
+      <div class="tablewrap"><table><thead><tr><th class="l nosort">Item</th><th class="l nosort">Bedingung</th><th class="nosort">Aktuell</th><th class="nosort">Status</th><th class="nosort"></th></tr></thead>
+      <tbody>${al || emptyRow(5, 'Keine Alarme', 'Öffne ein Item und lege im Detailfenster einen Alarm an.')}</tbody></table></div>`;
+  },
+
+  settings(){
+    const notif = ('Notification' in window) ? Notification.permission : 'nicht unterstützt';
+    const notifTxt = {granted:'erlaubt ✓', denied:'im Browser blockiert', default:'noch nicht erlaubt'}[notif] || notif;
+    return `<div class="settings">
+      <div class="card"><h3>💼 Kapital & Steuer</h3>
+        ${coinCtl('budget', 'Dein Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b')}
+        <div><span class="lbl">Bazaar-Steuer</span>${segCtl('tax', [[1.25,'1,25 %'],[1.125,'1,125 %'],[1,'1 %']], true)}
+          <small class="mut" style="display:block;font-size:11.5px;margin-top:6px">Standard 1,25 %. Mit dem Community-Shop-Upgrade „Bazaar Flipper" weniger.</small></div>
+        ${sliderCtl('share')}
+      </div>
+      <div class="card"><h3>🔄 Live-Daten</h3>
+        ${sliderCtl('interval')}
+        <div><span class="lbl">Einträge pro Seite</span>${segCtl('pageSize', [[25,'25'],[50,'50'],[100,'100'],[250,'250']], true)}</div>
+        <p>${S.polls} Abrufe in dieser Sitzung · läuft seit ${ago(Date.now() - S.sessionStart)}.</p>
+      </div>
+      <div class="card"><h3>🔔 Alarme</h3>
+        ${switchCtl('sound', 'Ton bei Alarm')}
+        <p>Desktop-Benachrichtigungen: <b>${notifTxt}</b></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="notif">Benachrichtigungen erlauben</button><button class="btn" data-act="test">Test-Alarm</button></div>
+      </div>
+      <div class="card"><h3>🗄 Preisverlauf</h3>
+        <div><span class="lbl">Aufbewahren für</span>${segCtl('retentionH', [[24,'1 Tag'],[48,'2 Tage'],[72,'3 Tage'],[168,'7 Tage']], true)}</div>
+        <p>${fmt(histPoints())} Datenpunkte für ${NF0.format(Object.keys(S.hist).length)} Items, nur lokal in diesem Browser${DB.db ? '' : ' – <b class="neg">Speicher nicht verfügbar, Verlauf nur bis zum Neuladen</b>'}.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="export">Als JSON exportieren</button><button class="btn danger" data-act="clear">Verlauf löschen</button></div>
+      </div>
+      <div class="card"><h3>🌐 Daten & Reset</h3>
+        <p>Bazaar & Item-Namen: offizielle Hypixel-API (kein Key nötig). Rezepte: NotEnoughUpdates-Repo, ${NF0.format(RECIPES.length)} Crafting-Rezepte, wöchentlich aktualisiert.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" data-act="items">Item-Namen neu laden</button><button class="btn danger" data-act="reset">Alle Einstellungen zurücksetzen</button></div>
+      </div>
+    </div>`;
+  },
+};
+function emptyRow(cols, title, txt){ return `<tr style="cursor:default"><td colspan="${cols}" class="empty" style="font-family:Inter,sans-serif;white-space:normal"><b>${title}</b>${txt}</td></tr>`; }
+
+/* =========================================================
    Detailansicht Item
    ========================================================= */
-function openDetail(id){ S.craftDetail = null; S.detail = id; $('#modal').classList.add('on'); renderDetail(false); }
-function closeDetail(){ S.detail = null; S.craftDetail = null; $('#modal').classList.remove('on'); }
-
+function openDetail(id){ closeDrawer(); S.craftDetail = null; S.detail = id; $('#modal').classList.add('on'); renderDetail(false); }
+function closeDetail(){ S.detail = null; S.craftDetail = null; const m = $('#modal'); if (m) m.classList.remove('on'); }
 function book(arr, color, label){
   const top = (arr || []).slice(0, 12);
   const mx = Math.max(1, ...top.map(o => o.amount));
@@ -783,6 +875,7 @@ function book(arr, color, label){
     top.map(o => { cum += o.amount; return `<tr><td class="l" style="color:${color}">${price(o.pricePerUnit)}</td><td>${fmt(o.amount)}<div class="barbg" style="width:${(o.amount/mx*100).toFixed(0)}%;background:${color}"></div></td><td class="mut">${o.orders}</td><td class="mut">${fmt(cum)}</td></tr>`; }).join('')
     || '<tr><td colspan="4" class="empty">leer</td></tr>'}</tbody></table>`;
 }
+function bigIcon(id, name){ return icon(id, name).replace('class="ic"', 'class="ic lg"'); }
 function renderDetail(update){
   const id = S.detail, r = S.byId[id], p = S.products[id];
   if (!r || !p) return;
@@ -802,26 +895,26 @@ function renderDetail(update){
     <div class="stats">${small.map(([l,v]) => `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>`;
   if (update){
     $('#dStats').innerHTML = statsHtml;
-    $('#dBuy').innerHTML = book(p.sell_summary, '#3fcf8e', 'Buy-Orders');
-    $('#dSell').innerHTML = book(p.buy_summary, '#ff9f43', 'Sell-Offers');
+    $('#dBuy').innerHTML = book(p.sell_summary, '#3fcf8e', 'Preis');
+    $('#dSell').innerHTML = book(p.buy_summary, '#ff9f43', 'Preis');
     drawChart(); return;
   }
   const alerts = S.alerts.map((a, i) => ({a, i})).filter(x => x.a.id === id);
   const watched = S.watch.includes(id);
   $('#sheet').innerHTML = `
     <div class="head">
-      <div class="itemcell" style="max-width:none">${icon(id, r.name).replace('class="ic"', 'class="ic" style="width:46px;height:46px;font-size:17px;--rc:' + rarityColor(id) + '"')}<div><h2>${esc(r.name)}</h2><div class="subid">${esc(id)}${S.tiers[id] ? ' · ' + esc(S.tiers[id]) : ''} · ${NF0.format(h ? h.t.length : 0)} Datenpunkte</div></div></div>
+      <div class="itemcell" style="max-width:none">${bigIcon(id, r.name)}<div><h2>${esc(r.name)}</h2><div class="subid">${esc(id)}${S.tiers[id] ? ' · ' + esc(S.tiers[id]) : ''} · ${NF0.format(h ? h.t.length : 0)} Datenpunkte</div></div></div>
       <div class="spacer"></div>
       <button class="btn" data-act="copy" title="Namen kopieren, um ihn in /bz einzufügen">📋 Name kopieren</button>
       <button class="btn" data-star="${esc(id)}">${watched ? '★ Auf Watchlist' : '☆ Zur Watchlist'}</button>
-      <button class="btn" data-act="close">✕</button>
+      <button class="btn icon" data-act="close" title="Schließen">✕</button>
     </div>
     ${r.risk.length ? `<div class="banner warnb" style="margin:14px 0 0">⚠ ${r.risk.map(esc).join('<br>⚠ ')}</div>` : ''}
     <div id="dStats">${statsHtml}</div>
     <div class="subcard">
       <h3>Preisverlauf <span class="legend"><span><i style="background:#ff9f43"></i>Instabuy</span><span><i style="background:#3fcf8e"></i>Instasell</span></span>
         <span class="spacer"></span>
-        <span class="seg" style="height:32px">${[[HOUR,'1h'],[6*HOUR,'6h'],[24*HOUR,'24h'],[Infinity,'Alles']].map(([v,l]) => `<button class="${S.detailRange === v ? 'on' : ''}" data-range="${v}">${l}</button>`).join('')}</span></h3>
+        <span class="seg">${[[HOUR,'1h'],[6*HOUR,'6h'],[24*HOUR,'24h'],[Infinity,'Alles']].map(([v,l]) => `<button class="${S.detailRange === v ? 'on' : ''}" data-range="${v}">${l}</button>`).join('')}</span></h3>
       <div class="chartbox"><canvas id="chart"></canvas><div class="tip" id="tip"></div></div>
     </div>
     <div class="grid2" style="margin-top:14px">
@@ -829,12 +922,12 @@ function renderDetail(update){
       <div class="subcard"><h3>🟠 Sell-Offers <span class="mut" style="font-weight:400">· hier steht deine Sell-Offer</span></h3><div id="dSell">${book(p.buy_summary, '#ff9f43', 'Preis')}</div></div>
     </div>
     <div class="subcard" style="margin-top:14px"><h3>🔔 Preis-Alarm</h3>
-      <div class="row">
+      <div class="alertrow">
         <select id="alCond">${Object.entries(CONDS).map(([k,c]) => `<option value="${k}">${c.label}</option>`).join('')}</select>
-        <input id="alVal" type="number" step="any" style="width:170px" placeholder="Wert in Coins" value="${r.topSell ? r1(r.topSell) : ''}">
+        <div class="input"><input id="alVal" inputmode="decimal" placeholder="z. B. 1,5k" value="${r.topSell ? coinText(r1(r.topSell)) : ''}"><span class="unit">Coins</span></div>
         <button class="btn primary" data-act="addalert">Alarm anlegen</button>
       </div>
-      ${alerts.length ? `<div class="row">${alerts.map(({a,i}) => `<span class="pill">${CONDS[a.cond].label} ${price(a.value)} <button class="star" data-delalert="${i}" title="entfernen">✕</button></span>`).join('')}</div>` : ''}
+      ${alerts.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">${alerts.map(({a,i}) => `<span class="pill">${CONDS[a.cond].label} ${price(a.value)} <button class="star" style="font-size:12px" data-delalert="${i}" title="entfernen">✕</button></span>`).join('')}</div>` : ''}
     </div>`;
   drawChart();
 }
@@ -842,39 +935,36 @@ function renderDetail(update){
 /* =========================================================
    Detailansicht Craft
    ========================================================= */
-function openCraft(ri){ S.detail = null; S.craftDetail = ri; $('#modal').classList.add('on'); renderCraftDetail(); }
+function openCraft(ri){ closeDrawer(); S.detail = null; S.craftDetail = ri; $('#modal').classList.add('on'); renderCraftDetail(); }
 function renderCraftDetail(){
   const c = S.crafts.find(x => x.ri === S.craftDetail);
-  if (!c){ $('#sheet').innerHTML = '<div class="empty">Rezept aktuell nicht verfügbar.</div><button class="btn" data-act="close">Schließen</button>'; return; }
+  if (!c){ $('#sheet').innerHTML = '<div class="empty"><b>Rezept aktuell nicht verfügbar</b></div><button class="btn" data-act="close">Schließen</button>'; return; }
   const o = S.byId[c.id], s = S.set;
   const rowFor = (r, q, unit, label) => `<tr data-open="${esc(r.id)}"><td class="item">${itemCell(r.id, r.name, '', r.risk)}</td><td>${fmt(q)}</td><td>${price(unit)}</td><td>${fmt(unit * q)}</td>
     <td>${fmt(r.perHour)}<div class="sub">Stk/h</div></td><td class="${liquid(r) ? 'pos' : 'neg'}">${liquid(r) ? '✓' : '✗'}</td><td class="mut" style="font-family:Inter,sans-serif">${label}</td></tr>`;
-  const big = [
-    ['Kosten/Craft', fmt(c.cost)], ['Erlös/Craft (n. Steuer)', fmt(c.revenue)],
-    ['Gewinn/Craft', `<span class="${cls(c.profit)}">${fmt(c.profit)}</span>`], ['Profit/h', `<span class="gold">${fmt(c.pph)}</span>`],
-  ];
-  const small = [
-    ['Marge', pct(c.marginPct, false)], ['Sofort-Gewinn (Insta/Insta)', `<span class="${cls(c.fastProfit)}">${fmt(c.fastProfit)}</span>`],
-    ['Crafts/h Markt', fmt(c.craftsH)], ['Crafts/h für dich', fmt(c.qty)],
-    ['Max. Crafts mit Budget', fmt(Math.floor(s.budget / c.cost))], ['Engpass', esc(c.limitingName)],
-  ];
+  const big = [['Kosten/Craft', fmt(c.cost)], ['Erlös/Craft (n. Steuer)', fmt(c.revenue)], ['Gewinn/Craft', `<span class="${cls(c.profit)}">${fmt(c.profit)}</span>`], ['Profit/h', `<span class="gold">${fmt(c.pph)}</span>`]];
+  const small = [['Marge', pct(c.marginPct, false)], ['Sofort-Gewinn (Insta/Insta)', `<span class="${cls(c.fastProfit)}">${fmt(c.fastProfit)}</span>`], ['Crafts/h Markt', fmt(c.craftsH)], ['Crafts/h für dich', fmt(c.qty)], ['Max. Crafts mit Budget', fmt(Math.floor(s.budget / c.cost))], ['Engpass', esc(c.limitingName)]];
   $('#sheet').innerHTML = `
     <div class="head">
-      <div class="itemcell" style="max-width:none">${icon(c.id, c.name).replace('class="ic"', 'class="ic" style="width:46px;height:46px;font-size:17px;--rc:' + rarityColor(c.id) + '"')}<div><h2>🔨 ${c.cnt > 1 ? c.cnt + '× ' : ''}${esc(c.name)}</h2><div class="subid">Craft-Flip · ${esc(c.id)}</div></div></div>
+      <div class="itemcell" style="max-width:none">${bigIcon(c.id, c.name)}<div><h2>🔨 ${c.cnt > 1 ? c.cnt + '× ' : ''}${esc(c.name)}</h2><div class="subid">Craft-Flip · ${esc(c.id)}</div></div></div>
       <div class="spacer"></div>
       <button class="btn" data-star="${esc(c.id)}">${S.watch.includes(c.id) ? '★ Auf Watchlist' : '☆ Zur Watchlist'}</button>
-      <button class="btn" data-act="close">✕</button>
+      <button class="btn icon" data-act="close" title="Schließen">✕</button>
     </div>
     ${c.risk.length ? `<div class="banner warnb" style="margin:14px 0 0">⚠ ${c.risk.map(esc).join('<br>⚠ ')}</div>` : ''}
     <div class="bigstats">${big.map(([l,v]) => `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>
     <div class="stats">${small.map(([l,v]) => `<div class="stat"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')}</div>
     <div class="tablewrap"><table><thead><tr><th class="l nosort">Item</th><th class="nosort">Menge</th><th class="nosort">Stückpreis</th><th class="nosort">Summe</th><th class="nosort">Nachfrage</th><th class="nosort">Gefragt</th><th class="nosort">Wie</th></tr></thead><tbody>
       ${c.parts.map(p => rowFor(S.byId[p.id], p.q, p.unit, s.craftBuy === 'insta' ? 'Instabuy' : 'Buy-Order')).join('')}
-      <tr style="cursor:default"><td colspan="7" style="background:var(--panel2);text-align:left;font-family:Inter,sans-serif;color:var(--mut);padding:6px 14px">⬇ craften ergibt</td></tr>
+      <tr style="cursor:default"><td colspan="7" style="background:var(--panel2);text-align:left;font-family:Inter,sans-serif;color:var(--mut);padding:7px 16px">⬇ craften ergibt</td></tr>
       ${rowFor(o, c.cnt, s.craftSell === 'offer' ? o.sellAt : o.topBuy, s.craftSell === 'offer' ? 'Sell-Offer' : 'Instasell')}
     </tbody></table></div>
     <p class="hint">💡 Klick auf ein Item öffnet dessen Preisverlauf & Orderbuch.</p>`;
 }
+function rerenderModal(){ if (S.detail) renderDetail(false); else if (S.craftDetail != null) renderCraftDetail(); }
+
+/* Nach jedem Datenabruf */
+function render(){ renderMain(); }
 
 /* =========================================================
    Chart (ohne externe Bibliothek)
@@ -951,59 +1041,65 @@ function chartHover(e){
 }
 
 /* =========================================================
-   Events
+   Einstellungen ändern
    ========================================================= */
+let recalcTimer = null;
+function setSetting(key, value, {quiet} = {}){
+  S.set[key] = value;
+  if (PRESET_KEYS.includes(key)) S.set.preset = 'custom';
+  save('settings', S.set);
+  if (key === 'interval') schedule();
+  clearTimeout(recalcTimer);
+  const run = () => { if (S.rows.length) ingest(false); else renderMain(); };
+  if (quiet) recalcTimer = setTimeout(run, 140); else run();
+}
+function applyPreset(k){
+  const p = PRESETS[k]; if (!p) return;
+  for (const key of PRESET_KEYS) S.set[key] = p[key];
+  S.set.preset = k; save('settings', S.set);
+  if (S.rows.length) ingest(false); else renderMain(true);
+  if (S.drawer) renderDrawer();
+}
+function refreshControls(){ if (S.drawer) renderDrawer(); if (S.tab === 'settings') renderMain(true); }
 function toggleWatch(id){
   const i = S.watch.indexOf(id);
   if (i >= 0) S.watch.splice(i, 1); else S.watch.push(id);
   save('watch', S.watch);
 }
-function setSetting(key, el){
-  let v = el.type === 'checkbox' ? el.checked : el.tagName === 'SELECT' ? el.value : parseFloat(el.value);
-  if (typeof v === 'number' && !isFinite(v)) return;
-  if (key === 'interval') v = Math.max(5, v);
-  if (key === 'pageSize') v = Math.max(10, Math.round(v));
-  S.set[key] = v;
-  if (PRESET_KEYS.includes(key)) S.set.preset = 'custom';
-  save('settings', S.set);
-  if (key === 'interval') schedule();
-  if (S.rows.length) ingest(false);
-  render(true);
-}
-function applyPreset(k){
-  if (k === 'custom'){ S.set.preset = 'custom'; S.filterOpen = true; save('filterOpen', true); }
-  else { Object.assign(S.set, PRESETS[k]); delete S.set.label; S.set.preset = k; }
-  save('settings', S.set);
-  if (S.rows.length) ingest(false);
-  render(true);
-}
-function rerenderModal(){ if (S.detail) renderDetail(false); else if (S.craftDetail != null) renderCraftDetail(); }
 
+/* =========================================================
+   Events
+   ========================================================= */
 document.addEventListener('click', e => {
-  const t = e.target;
-  const q = sel => t.closest(sel);
+  const t = e.target, q = sel => t.closest(sel);
   let el;
-  if ((el = q('[data-star]'))){ e.stopPropagation(); toggleWatch(el.dataset.star); render(true); rerenderModal(); return; }
-  if ((el = q('[data-delalert]'))){ e.stopPropagation(); S.alerts.splice(+el.dataset.delalert, 1); save('alerts', S.alerts); render(true); rerenderModal(); return; }
-  if ((el = q('[data-go]'))){ closeDetail(); go(el.dataset.go); return; }
+  if ((el = q('[data-star]'))){ e.stopPropagation(); toggleWatch(el.dataset.star); renderMain(true); rerenderModal(); return; }
+  if ((el = q('[data-delalert]'))){ e.stopPropagation(); S.alerts.splice(+el.dataset.delalert, 1); save('alerts', S.alerts); renderMain(true); rerenderModal(); return; }
+  if ((el = q('[data-nav]'))){ nav(el.dataset.nav); return; }
+  if ((el = q('[data-tab]'))){ closeDetail(); nav(S.tool + '/' + el.dataset.tab); return; }
   if ((el = q('[data-preset]'))){ applyPreset(el.dataset.preset); return; }
+  if ((el = q('[data-coinset]'))){ const [k, v] = el.dataset.coinset.split(':'); setSetting(k, +v); refreshControls(); return; }
+  if ((el = q('[data-setv]'))){ const v = el.dataset.val, k = el.dataset.setv; setSetting(k, isNaN(+v) ? v : +v); refreshControls(); return; }
   if ((el = q('th[data-sort]'))){
-    const tab = S.page, k = el.dataset.sort, cur = S.sort[tab];
+    const tab = S.tab, k = el.dataset.sort, cur = S.sort[tab];
     if (cur.k === k) cur.d *= -1; else { cur.k = k; cur.d = k === 'name' ? 1 : -1; }
-    save('sort', S.sort); S.pageNo[tab] = 0; render(true); return;
+    save('sort', S.sort); S.pageNo[tab] = 0; renderMain(true); return;
   }
-  if ((el = q('[data-pg]'))){ S.pageNo[S.page] = Math.max(0, (S.pageNo[S.page] || 0) + +el.dataset.pg); render(true); window.scrollTo({top:0}); return; }
+  if ((el = q('[data-pg]'))){ S.pageNo[S.tab] = Math.max(0, (S.pageNo[S.tab] || 0) + +el.dataset.pg); renderMain(true); window.scrollTo({top:0}); return; }
   if ((el = q('[data-range]'))){ S.detailRange = +el.dataset.range; renderDetail(false); return; }
   if ((el = q('[data-craft]'))){ openCraft(+el.dataset.craft); return; }
   if ((el = q('[data-open]'))){ openDetail(el.dataset.open); return; }
   if (t.id === 'modal'){ closeDetail(); return; }
+  if (t.id === 'scrim'){ closeDrawer(); return; }
   if (q('#refreshBtn')){ poll(); return; }
-  if (q('#burger')){ $('#side').classList.toggle('open'); return; }
-  if ((el = q('#pauseBtn'))){ S.paused = !S.paused; el.innerHTML = S.paused ? '▶<span class="hidem"> Weiter</span>' : '⏸<span class="hidem"> Pause</span>'; if (S.paused) schedule(); else poll(); tick(); return; }
+  if ((el = q('#pauseBtn'))){ S.paused = !S.paused; el.textContent = S.paused ? '▶' : '⏸'; if (S.paused) schedule(); else poll(); tick(); return; }
   const act = (el = q('[data-act]')) && el.dataset.act;
   if (!act) return;
+  e.preventDefault();
   if (act === 'close') closeDetail();
-  else if (act === 'filters'){ S.filterOpen = !S.filterOpen; save('filterOpen', S.filterOpen); render(true); }
+  else if (act === 'filters') openDrawer();
+  else if (act === 'closedrawer') closeDrawer();
+  else if (act === 'clearsearch'){ S.search = ''; S.pageNo[S.tab] = 0; renderMain(true); const s = $('#search'); if (s) s.focus(); }
   else if (act === 'copy'){
     const name = S.byId[S.detail]?.name || '';
     const done = () => { el.textContent = '✓ Kopiert'; setTimeout(() => el.textContent = '📋 Name kopieren', 1500); };
@@ -1013,33 +1109,56 @@ document.addEventListener('click', e => {
     });
   }
   else if (act === 'addalert'){
-    const v = parseFloat($('#alVal').value); if (!isFinite(v)) return;
+    const inp = $('#alVal'), v = parseCoins(inp.value);
+    if (!isFinite(v) || v <= 0){ inp.parentElement.style.borderColor = 'var(--red)'; inp.focus(); return; }
     S.alerts.push({id: S.detail, cond: $('#alCond').value, value: v, last: 0});
     save('alerts', S.alerts);
     if (!S.watch.includes(S.detail)){ S.watch.push(S.detail); save('watch', S.watch); }
-    renderDetail(false); render(true);
+    renderDetail(false); renderMain(true);
   }
-  else if (act === 'notif'){ try{ Notification.requestPermission().then(() => render(true)); }catch{} }
+  else if (act === 'notif'){ try{ Notification.requestPermission().then(() => renderMain(true)); }catch{} }
   else if (act === 'test') notify('Test-Alarm', 'So sieht ein Preis-Alarm aus.');
-  else if (act === 'clear'){ if (el.dataset.sure){ S.hist = {}; DB.clear(); render(true); } else { el.dataset.sure = 1; el.textContent = 'Wirklich löschen? Nochmal klicken'; } }
+  else if (act === 'clear'){ if (el.dataset.sure){ S.hist = {}; DB.clear(); renderMain(true); } else { el.dataset.sure = 1; el.textContent = 'Wirklich löschen? Nochmal klicken'; } }
   else if (act === 'export'){
     const blob = new Blob([JSON.stringify({exported: new Date().toISOString(), hist: S.hist})], {type:'application/json'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'bazaar-verlauf-' + new Date().toISOString().slice(0,10) + '.json'; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   }
   else if (act === 'items'){ save('items', null); loadItems().then(() => { if (S.rows.length) ingest(false); }); }
-  else if (act === 'reset'){ S.set = Object.assign({}, DEFAULTS); save('settings', S.set); schedule(); if (S.rows.length) ingest(false); render(true); }
+  else if (act === 'reset'){ S.set = Object.assign({}, DEFAULTS); save('settings', S.set); schedule(); if (S.rows.length) ingest(false); renderMain(true); }
 });
-document.addEventListener('change', e => { const k = e.target.dataset && e.target.dataset.set; if (k) setSetting(k, e.target); });
-document.addEventListener('input', e => { if (e.target.id === 'search'){ S.search = e.target.value; S.pageNo[S.page] = 0; render(); } });
+
+document.addEventListener('input', e => {
+  const t = e.target;
+  if (t.id === 'search'){ S.search = t.value; S.pageNo[S.tab] = 0; renderMain(); return; }
+  if (t.dataset.slider){
+    const key = t.dataset.slider, c = SLIDERS[key], v = c.steps[+t.value];
+    t.style.setProperty('--p', (t.value / (c.steps.length - 1) * 100).toFixed(1) + '%');
+    document.querySelectorAll(`[data-out="${key}"]`).forEach(o => o.textContent = c.f(v));
+    setSetting(key, v, {quiet: true});
+  }
+});
+document.addEventListener('change', e => {
+  const t = e.target;
+  if (t.dataset.slider){ refreshControls(); return; }
+  if (t.dataset.coin){
+    const key = t.dataset.coin, v = parseCoins(t.value);
+    if (!isFinite(v) || v < 0){ t.value = coinText(S.set[key]); t.parentElement.style.borderColor = 'var(--red)'; setTimeout(() => t.parentElement.style.borderColor = '', 900); return; }
+    setSetting(key, v); refreshControls(); return;
+  }
+  if (t.dataset.set && t.type === 'checkbox'){ setSetting(t.dataset.set, t.checked); refreshControls(); }
+});
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape'){ if (S.detail || S.craftDetail != null) closeDetail(); else $('#side').classList.remove('open'); }
-  if (e.key === '/' && !['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)){ const s = $('#search'); if (s){ e.preventDefault(); s.focus(); } }
+  const tag = document.activeElement.tagName;
+  if (e.key === 'Escape'){ if (S.detail || S.craftDetail != null) closeDetail(); else if (S.drawer) closeDrawer(); return; }
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.coin){ e.target.blur(); return; }
+  if (e.key === 'Enter' && e.target.id === 'alVal'){ document.querySelector('[data-act=addalert]').click(); return; }
+  if (e.key === '/' && !['INPUT','SELECT','TEXTAREA'].includes(tag)){ const s = $('#search'); if (s){ e.preventDefault(); s.focus(); } }
 });
 document.addEventListener('mousemove', e => { if (e.target.id === 'chart') chartHover(e); });
 document.addEventListener('mouseleave', e => { if (e.target.id === 'chart'){ const tp = $('#tip'); if (tp) tp.style.display = 'none'; drawChart(); } }, true);
 window.addEventListener('resize', () => { if (S.detail) drawChart(); });
-window.addEventListener('hashchange', () => { const id = location.hash.slice(1); if (MOD[id] && id !== S.page) go(id); });
+window.addEventListener('hashchange', route);
 window.addEventListener('beforeunload', () => { DB.saveAll(S.hist); });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden && !S.paused && Date.now() - S.lastFetch > S.set.interval*1000) poll();
@@ -1049,7 +1168,7 @@ document.addEventListener('visibilitychange', () => {
    Start
    ========================================================= */
 (async function init(){
-  render(true);
+  route();
   setInterval(tick, 1000);
   await DB.open();
   S.hist = await DB.loadAll();

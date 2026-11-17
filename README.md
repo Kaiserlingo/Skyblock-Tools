@@ -4,18 +4,12 @@ Persönliche Tool-Sammlung für **Hypixel SkyBlock**, als statische Website übe
 
 **Live:** https://kaiserlingo.github.io/Skyblock-Tools/
 
-## Module
+## Aufbau der Seite
 
-| Modul | Status |
-|---|---|
-| 💰 Bazaar-Flips | live |
-| 🔨 Craft-Flips (nur Bazaar) | live |
-| 🏪 NPC-Flips | live |
-| 📊 Marktübersicht | live |
-| ⭐ Watchlist & Preis-Alarme | live |
-| 🏛 Auktionshaus, 🔥 Forge-Flips, ⛏ Minion-Rechner, 🗳 Mayor & Events, 👤 Spieler-Profil | geplant |
+- **Startbildschirm** – Auswahl der Tools (aktuell: Bazaar Flipper)
+- **Bazaar Flipper** – Übersicht, Flips, Craft-Flips (nur Bazaar), NPC-Flips, Markt, Watchlist & Alarme, Einstellungen
 
-## Aufbau
+## Dateien
 
 ```
 index.html                 Seitengerüst
@@ -26,9 +20,8 @@ tools/update_recipes.py    erzeugt recipes.json aus dem NotEnoughUpdates-REPO
 .github/workflows/         wöchentliches Rezept-Update
 ```
 
-**Neues Modul hinzufügen:** in `js/app.js` einen Eintrag in der `MODULES`-Liste ergänzen
-(`id`, `group`, `icon`, `title`, `desc`, `render`) und die zugehörige `render…()`-Funktion schreiben.
-Navigation und Startseite übernehmen das Modul automatisch.
+**Neues Tool hinzufügen:** in `js/app.js` einen Eintrag in der `TOOLS`-Liste ergänzen
+(`id`, `icon`, `title`, `desc`, `tabs`). Es erscheint dann automatisch als Karte auf dem Startbildschirm.
 
 ## Datenquellen
 
