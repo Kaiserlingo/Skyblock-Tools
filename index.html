@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SkyBlock Hub – Bazaar Tracker & Flipper</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side">
+    <div class="brand"><div class="coin">S</div><div><b>SkyBlock Hub</b><small>Hypixel SkyBlock Tools</small></div></div>
+    <div id="navlist"></div>
+    <div class="sidefoot">Daten: offizielle Hypixel-API<br><span id="footInfo"></span><br><span style="opacity:.8">Inoffizielles Fan-Projekt – nicht mit Hypixel oder Mojang verbunden.</span></div>
+  </aside>
+  <div class="content">
+    <header class="top">
+      <button class="btn ghost burger" id="burger">☰</button>
+      <div><h1 id="pageTitle">Übersicht</h1><div class="desc" id="pageDesc"></div></div>
+      <div class="spacer"></div>
+      <div class="livepill" id="livepill" title="Status der Live-Daten">
+        <svg class="ring" id="ring" viewBox="0 0 22 22"><circle class="bgc" cx="11" cy="11" r="8"/><circle class="fg" id="ringfg" cx="11" cy="11" r="8" stroke-dasharray="50.27" stroke-dashoffset="0"/></svg>
+        <span id="statusTxt" class="hidem">Starte…</span>
+      </div>
+      <button class="btn" id="pauseBtn" title="Auto-Update pausieren/fortsetzen">⏸<span class="hidem"> Pause</span></button>
+      <button class="btn primary" id="refreshBtn">↻<span class="hidem"> Aktualisieren</span></button>
+    </header>
+    <main>
+      <div class="banner" id="banner"></div>
+      <section id="view"></section>
+    </main>
+  </div>
+</div>
+<div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
+<div class="toasts" id="toasts"></div>
+
+<script src="js/app.js" defer></script>
+</body>
+</html>
