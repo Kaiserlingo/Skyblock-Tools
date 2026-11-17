@@ -1113,7 +1113,6 @@ PAGES.item = function(){
   if (!r) return `<p class="loading">${S.rows.length ? 'Dieses Item gibt es im Bazaar gerade nicht.' : 'Die Bazaar-Preise werden geladen …'}</p><p><button class="link" data-tab="overview">Zur Übersicht</button></p>`;
   const watched = S.watch.includes(id);
   const alerts = S.alerts.map((a, i) => ({a, i})).filter(x => x.a.id === id);
-  const qty = Math.max(1, Math.min(r.maxQty || 64, MAX_ORDER));
   return `<div class="ana">
     <p class="crumbline"><button class="link" data-act="back">Zurück</button></p>
     <header class="ahead">
@@ -1146,16 +1145,10 @@ PAGES.item = function(){
       <p class="hint" id="aSrc"></p>
     </section>
 
+    <section class="fcalc" id="fcalc">${calcSection(r)}</section>
+
     <div class="ana-grid">
       <section><h2>Im gewählten Zeitraum</h2><div id="aStats"><p class="mut">Lädt …</p></div></section>
-      <section><h2>Flip-Rechner</h2>
-        <div class="calc">
-          <label class="field"><span class="lbl">Menge</span><div class="input"><input id="cQty" inputmode="numeric" value="${qty}"><span class="unit">Stück</span></div></label>
-          <label class="field"><span class="lbl">Kaufen für</span><div class="input"><input id="cBuy" inputmode="decimal" value="${coinText(r1(r.buyAt))}"><span class="unit">pro Stück</span></div></label>
-          <label class="field"><span class="lbl">Verkaufen für</span><div class="input"><input id="cSell" inputmode="decimal" value="${coinText(r1(r.sellAt))}"><span class="unit">pro Stück</span></div></label>
-        </div>
-        <div id="cOut">${calcOut(r)}</div>
-      </section>
       <section><h2>Buy-Orders</h2><div id="aBuy">${book(S.products[id].sell_summary, 'buy')}</div></section>
       <section><h2>Sell-Offers</h2><div id="aSell">${book(S.products[id].buy_summary, 'sell')}</div></section>
       <section class="wide"><h2>Preisalarm</h2>
@@ -1179,18 +1172,197 @@ function anaFigures(r){
     ['Buy-Orders gesamt', NF0.format(r.sellOrders)], ['Sell-Offers gesamt', NF0.format(r.buyOrders)], ['NPC-Preis', price(r.npc)], ['Strategie-Filter', filteredFlips(true).some(x => x.id === r.id) ? 'passt' : 'passt nicht'],
   ]);
 }
-function calcOut(r){
-  const q = parseCoins(($('#cQty') || {}).value) || 0, b = parseCoins(($('#cBuy') || {}).value), sl = parseCoins(($('#cSell') || {}).value);
-  const qty = Math.floor(isFinite(q) && q > 0 ? q : (r.maxQty || 0));
-  const buy = isFinite(b) ? b : r.buyAt, sell = isFinite(sl) ? sl : r.sellAt, tax = S.set.tax / 100;
-  const cost = qty * buy, rev = qty * sell * (1 - tax), prof = rev - cost;
-  const fillBuy = r.wSell ? qty / (r.wSell / 168 * S.set.share / 100) : Infinity;   // Buy-Order füllt sich durch Instasells
-  const fillSell = r.wBuy ? qty / (r.wBuy / 168 * S.set.share / 100) : Infinity;
-  const dur = h => !isFinite(h) ? 'unbekannt' : h < 1 ? Math.max(1, Math.round(h * 60)) + ' min' : h < 48 ? NF1.format(h) + ' h' : NF1.format(h / 24) + ' Tage';
-  return facts([
-    ['Einsatz', fmt(cost)], ['Erlös nach Steuer', fmt(rev)], ['Gewinn', `<span class="${cls(prof)}">${fmt(prof)}</span>`], ['Marge', pct(cost ? prof / cost * 100 : 0, false)],
-    ['Buy-Order gefüllt in etwa', dur(fillBuy)], ['Sell-Offer verkauft in etwa', dur(fillSell)],
-  ].concat(qty > MAX_ORDER ? [['Hinweis', `max. ${NF0.format(MAX_ORDER)} pro Order`]] : []));
+/* =========================================================
+   Flip-Rechner
+   Rechnet exakt mit dem aktuellen Orderbuch:
+   - Buy-Order / Sell-Offer zu frei wählbaren Preisen (Standard: Top-Preis ± 0,1)
+   - Instabuy / Instasell laufen durch die Orderbuch-Stufen (Ø-Preis statt nur Top-Preis)
+   - Steuer nur auf Verkäufe (Sell-Offer und Instasell)
+   - Füllzeiten aus dem 7-Tage-Handel: bestenfalls (du bleibst ganz oben) und realistisch (dein Anteil)
+   ========================================================= */
+const DAILY_LIMIT = 15e9;    // Standard-Tageslimit des Bazaars in Coins
+const calcPrefs = Object.assign({mode: 'qty', qty: 0, budget: 0, buy: 'order', sell: 'offer', target: 2}, load('calcPrefs', {}));
+const calcState = {buyPx: null, sellPx: null, item: null};   // null = automatisch (Live-Preis)
+function saveCalc(){ save('calcPrefs', {mode: calcPrefs.mode, qty: calcPrefs.qty, budget: calcPrefs.budget, buy: calcPrefs.buy, sell: calcPrefs.sell, target: calcPrefs.target}); }
+
+// Stufen eines Orderbuchs abarbeiten: nach Menge oder nach Coin-Budget
+function walkBook(levels, {qty = Infinity, coins = Infinity}){
+  let left = qty, money = coins, filled = 0, cost = 0, last = null;
+  for (const l of levels || []){
+    if (left <= 0 || money <= 0) break;
+    let take = Math.min(left, l.amount);
+    if (isFinite(money)) take = Math.min(take, Math.floor(money / l.pricePerUnit));
+    if (take <= 0){ last = l.pricePerUnit; break; }
+    filled += take; cost += take * l.pricePerUnit; left -= take; money -= take * l.pricePerUnit; last = l.pricePerUnit;
+  }
+  return {filled, cost, avg: filled ? cost / filled : null, last, exhausted: isFinite(qty) ? filled < qty : false};
+}
+const autoBuy = r => r1(r.topBuy + 0.1);
+const autoSell = r => r1(r.topSell - 0.1);
+const orderPx = (r, side) => side === 'buy' ? (calcState.buyPx ?? autoBuy(r)) : (calcState.sellPx ?? autoSell(r));
+
+function flipCalc(r, buyMode, sellMode){
+  const p = S.products[r.id], tax = S.set.tax / 100, share = S.set.share / 100, warn = [];
+  // --- Menge bestimmen ---
+  let qty;
+  if (calcPrefs.mode === 'budget'){
+    const budget = calcPrefs.budget || S.set.budget;
+    qty = buyMode === 'insta' ? walkBook(p.buy_summary, {coins: budget}).filled : Math.floor(budget / orderPx(r, 'buy'));
+  } else qty = Math.floor(calcPrefs.qty || Math.min(r.maxQty || 64, MAX_ORDER));
+  qty = Math.max(0, qty);
+  // --- Einkauf ---
+  let buyPx, cost;
+  if (buyMode === 'insta'){
+    const w = walkBook(p.buy_summary, {qty});
+    buyPx = w.avg; cost = w.cost;
+    if (w.exhausted){ const rest = qty - w.filled; cost += rest * (w.last || r.topSell); buyPx = qty ? cost / qty : null; warn.push(`Das sichtbare Orderbuch hat nur ${NF0.format(w.filled)} Stück im Verkauf. Den Rest habe ich mit dem höchsten sichtbaren Preis geschätzt.`); }
+  } else { buyPx = orderPx(r, 'buy'); cost = qty * buyPx; }
+  // --- Verkauf ---
+  let sellPx, gross;
+  if (sellMode === 'insta'){
+    const w = walkBook(p.sell_summary, {qty});
+    sellPx = w.avg; gross = w.cost;
+    if (w.exhausted){ const rest = qty - w.filled; gross += rest * (w.last || r.topBuy); sellPx = qty ? gross / qty : null; warn.push(`Im sichtbaren Orderbuch wollen nur ${NF0.format(w.filled)} Stück gekauft werden. Den Rest habe ich mit dem niedrigsten sichtbaren Preis geschätzt.`); }
+  } else { sellPx = orderPx(r, 'sell'); gross = qty * sellPx; }
+  const taxC = gross * tax, net = gross - taxC, profit = net - cost;
+  // --- Zeit (Stunden) ---
+  const instasellH = r.wSell / 168, instabuyH = r.wBuy / 168;   // Instasells füllen Buy-Orders, Instabuys füllen Sell-Offers
+  const tBuy = buyMode === 'insta' ? {best: 0, real: 0} : {best: instasellH ? qty / instasellH : Infinity, real: instasellH ? qty / (instasellH * share) : Infinity};
+  const tSell = sellMode === 'insta' ? {best: 0, real: 0} : {best: instabuyH ? qty / instabuyH : Infinity, real: instabuyH ? qty / (instabuyH * share) : Infinity};
+  const tReal = tBuy.real + tSell.real, tBest = tBuy.best + tSell.best;
+  // --- Hinweise ---
+  if (buyMode === 'order' && sellMode === 'offer' && buyPx >= sellPx) warn.push('Dein Kaufpreis liegt nicht unter deinem Verkaufspreis – so gibt es keinen Gewinn.');
+  if (buyMode === 'order' && buyPx > r.topSell && r.topSell) warn.push('Deine Buy-Order liegt über dem Instabuy-Preis. Dann ist Instabuy günstiger.');
+  if (sellMode === 'offer' && sellPx < r.topBuy && r.topBuy) warn.push('Deine Sell-Offer liegt unter dem Instasell-Preis. Dann bekommst du per Instasell mehr.');
+  const orders = Math.ceil(qty / MAX_ORDER);
+  if (orders > 1) warn.push(`Pro Order gehen höchstens ${NF0.format(MAX_ORDER)} Stück – du brauchst ${orders} Orders.`);
+  if (Math.max(cost, gross) > DAILY_LIMIT) warn.push(`Das Volumen liegt über dem Standard-Tageslimit des Bazaars von ${words(DAILY_LIMIT)} Coins – verteil den Flip auf mehrere Tage.`);
+  if (cost > S.set.budget && calcPrefs.mode === 'qty') warn.push(`Der Einkauf (${fmt(cost)}) ist größer als dein Budget (${fmt(S.set.budget)}).`);
+  if (r.risk.length) warn.push('Warnhinweis zum Item: ' + r.risk.join(' '));
+  return {qty, buyPx, sellPx, cost, gross, taxC, net, profit, margin: cost ? profit / cost * 100 : 0, tBuy, tSell, tReal, tBest,
+          pph: tReal > 0 && isFinite(tReal) ? profit / tReal : null, perDay: tReal > 0 && isFinite(tReal) ? Math.floor(24 / tReal) : null, orders, warn};
+}
+function dur(h){
+  if (h === 0) return 'sofort';
+  if (!isFinite(h)) return 'unbekannt';
+  if (h < 1/60) return 'unter 1 min';
+  if (h < 1) return Math.round(h * 60) + ' min';
+  if (h < 48) return NF1.format(h) + ' h';
+  return NF1.format(h / 24) + ' Tage';
+}
+const MODE_NAMES = {order: 'Buy-Order', insta: 'Instabuy', offer: 'Sell-Offer', instas: 'Instasell'};
+function calcSection(r){
+  const qtyVal = calcPrefs.qty || Math.min(r.maxQty || 64, MAX_ORDER);
+  const bv = calcState.buyPx ?? autoBuy(r), sv = calcState.sellPx ?? autoSell(r);
+  return `<header><h2>Flip-Rechner</h2><p class="note">Rechnet mit dem aktuellen Orderbuch und deiner Bazaar-Steuer von ${NF2.format(S.set.tax)} %. Live-Preise werden automatisch übernommen, bis du selbst einen Preis einträgst.</p></header>
+  <div class="fc-grid">
+    <div class="fc-in">
+      <div class="field">
+        <div class="lblrow"><span class="lbl">${calcPrefs.mode === 'budget' ? 'Budget' : 'Menge'}</span>${segC('mode', [['qty','Menge'],['budget','Budget']])}</div>
+        ${calcPrefs.mode === 'budget'
+          ? `<div class="input"><input id="cBudget" data-cin="budget" inputmode="decimal" value="${coinText(calcPrefs.budget || S.set.budget)}"><span class="unit">Coins</span></div>
+             <div class="quick">${[1e6, 10e6, 50e6, 100e6, 500e6].map(v => `<button data-cq="b:${v}">${fmt(v)}</button>`).join('')}<button data-cq="b:set">Mein Budget</button></div>`
+          : `<div class="input"><input id="cQty" data-cin="qty" inputmode="numeric" value="${NF0.format(qtyVal)}"><span class="unit">Stück</span></div>
+             <div class="quick">${[64, 640, 2240, 10000].map(v => `<button data-cq="q:${v}">${NF0.format(v)}</button>`).join('')}<button data-cq="q:budget" title="So viel, wie dein Budget beim aktuellen Kaufpreis hergibt">Max. Budget</button><button data-cq="q:order" title="Größte erlaubte Order">Max. Order</button></div>`}
+      </div>
+      <div class="field">
+        <div class="lblrow"><span class="lbl">Kaufen per</span>${segC('buy', [['order','Buy-Order'],['insta','Instabuy']])}</div>
+        ${calcPrefs.buy === 'order' ? priceInput('buy', bv, autoBuy(r), 'Höchste Buy-Order + 0,1') : `<p class="note" id="cBuyNote"></p>`}
+      </div>
+      <div class="field">
+        <div class="lblrow"><span class="lbl">Verkaufen per</span>${segC('sell', [['offer','Sell-Offer'],['insta','Instasell']])}</div>
+        ${calcPrefs.sell === 'offer' ? priceInput('sell', sv, autoSell(r), 'Niedrigste Sell-Offer − 0,1') : `<p class="note" id="cSellNote"></p>`}
+      </div>
+      <div class="field">
+        <span class="lbl">Bazaar-Steuer</span>${segCtl('tax', [[1.25,'1,25 %'],[1.125,'1,125 %'],[1,'1 %']]).replace('class="seg"', 'class="seg full"')}
+        <p class="note">1,125 % mit dem kostenlosen Community-Upgrade „Bazaar Flipper“, weniger mit dem kostenpflichtigen.</p>
+      </div>
+      ${sliderCtl('share')}
+      <div class="field">
+        <div class="lblrow"><span class="lbl">Ziel-Marge</span><div class="input small"><input id="cTarget" data-cin="target" inputmode="decimal" value="${NF1.format(calcPrefs.target)}"><span class="unit">%</span></div></div>
+      </div>
+    </div>
+    <div class="fc-out" id="cOut">${calcResult(r)}</div>
+  </div>
+  <h3 class="fc-h">Alle Wege im Vergleich</h3>
+  <div id="cCompare">${calcCompare(r)}</div>`;
+}
+function segC(key, opts){ return `<div class="seg sm">${opts.map(([v, l]) => `<button data-cset="${key}" data-val="${v}" class="${calcPrefs[key] === v ? 'on' : ''}">${l}</button>`).join('')}</div>`; }
+function priceInput(side, val, live, how){
+  const manual = side === 'buy' ? calcState.buyPx != null : calcState.sellPx != null;
+  return `<div class="input"><input id="c${side === 'buy' ? 'Buy' : 'Sell'}" data-cin="${side}Px" inputmode="decimal" value="${NF1f.format(val)}"><span class="unit">pro Stück</span></div>
+    <p class="note" id="c${side}Live">${manual ? `Eigener Preis. Live: ${NF1f.format(live)} <button class="link" data-creset="${side}">Live-Preis nehmen</button>` : `Automatisch: ${how}.`} <button class="link" data-ccopy="${side}">Preis kopieren</button></p>`;
+}
+function calcResult(r){
+  const c = flipCalc(r, calcPrefs.buy, calcPrefs.sell), tax = S.set.tax / 100, t = calcPrefs.target / 100;
+  const be = c.buyPx / (1 - tax), tgtSell = c.buyPx * (1 + t) / (1 - tax), maxBuy = c.sellPx * (1 - tax) / (1 + t);
+  // Risiko: sofort per Instasell raus / zum Tief des Zeitraums verkaufen
+  const dump = walkBook(S.products[r.id].sell_summary, {qty: c.qty}), dumpNet = (dump.cost + (c.qty - dump.filled) * (dump.last || r.topBuy)) * (1 - tax) - c.cost;
+  const ch = S.achart, lows = ch && ch.data.hi.filter(v => v != null);
+  const low = lows && lows.length > 1 ? Math.min(...lows) : null, lowNet = low ? c.qty * (low - 0.1) * (1 - tax) - c.cost : null;
+  const how = `${MODE_NAMES[calcPrefs.buy]} → ${calcPrefs.sell === 'offer' ? 'Sell-Offer' : 'Instasell'}`;
+  return `${figures([
+      ['Gewinn', `<span class="${cls(c.profit)}">${fmt(c.profit)}</span>`],
+      ['Marge', `<span class="${cls(c.margin)}">${pct(c.margin, false)}</span>`],
+      ['Dauer pro Durchlauf', dur(c.tReal)],
+      ['Profit pro Stunde', c.pph != null ? fmt(c.pph) : (c.tReal === 0 ? 'sofort' : '–')],
+    ])}
+    <div class="receipt">
+      <div><span>Einkauf: ${NF0.format(c.qty)} × ${price(c.buyPx)}${calcPrefs.buy === 'insta' ? ' (Ø über das Orderbuch)' : ''}</span><b>− ${fmt(c.cost)}</b></div>
+      <div><span>Verkauf: ${NF0.format(c.qty)} × ${price(c.sellPx)}${calcPrefs.sell === 'insta' ? ' (Ø über das Orderbuch)' : ''}</span><b>+ ${fmt(c.gross)}</b></div>
+      <div><span>Bazaar-Steuer ${NF2.format(S.set.tax)} % auf den Verkauf</span><b>− ${fmt(c.taxC)}</b></div>
+      <div class="sum"><span>Gewinn (${how})</span><b class="${cls(c.profit)}">${fmt(c.profit)}</b></div>
+      <div class="per"><span>pro Stück</span><b>${price(c.qty ? c.profit / c.qty : 0)}</b></div>
+    </div>
+    ${facts([
+      ['Buy-Order gefüllt', calcPrefs.buy === 'insta' ? 'sofort' : `${dur(c.tBuy.real)} <small>(bestenfalls ${dur(c.tBuy.best)})</small>`],
+      ['Sell-Offer verkauft', calcPrefs.sell === 'insta' ? 'sofort' : `${dur(c.tSell.real)} <small>(bestenfalls ${dur(c.tSell.best)})</small>`],
+      ['Durchläufe pro Tag', c.perDay != null ? NF0.format(c.perDay) : (c.tReal === 0 ? 'beliebig' : '–')],
+      ['Gewinn pro Tag', c.perDay ? fmt(c.perDay * c.profit) : '–'],
+      ['Kapital gebunden', fmt(c.cost) + (S.set.budget ? ` <small>(${NF0.format(c.cost / S.set.budget * 100)} % deines Budgets)</small>` : '')],
+      ['Orders nötig', NF0.format(c.orders)],
+    ])}
+    <h3 class="fc-h">Preise zum Merken</h3>
+    ${facts([
+      ['Break-even Verkaufspreis', `${price(be)} <small>(ab hier kein Verlust)</small>`],
+      [`Verkaufspreis für ${NF1.format(calcPrefs.target)} % Marge`, price(tgtSell)],
+      [`Höchster Kaufpreis für ${NF1.format(calcPrefs.target)} % Marge`, price(maxBuy)],
+      ['Abstand zum Break-even', c.sellPx ? `<span class="${cls(c.sellPx - be)}">${pct((c.sellPx - be) / be * 100)}</span>` : '–'],
+    ])}
+    <h3 class="fc-h">Wenn es schiefgeht</h3>
+    ${facts([
+      ['Sofort per Instasell wieder raus', `<span class="${cls(dumpNet)}">${fmt(dumpNet)}</span>`],
+      ['Verkauf zum Tief im Chart-Zeitraum', lowNet != null ? `<span class="${cls(lowNet)}">${fmt(lowNet)}</span> <small>(bei ${price(low - 0.1)})</small>` : '<span class="mut">Chart lädt noch</span>'],
+    ])}
+    ${c.warn.length ? `<ul class="warnlist">${c.warn.map(w => `<li>${esc(w)}</li>`).join('')}</ul>` : ''}`;
+}
+function calcCompare(r){
+  const combos = [['order','offer'],['order','insta'],['insta','offer'],['insta','insta']];
+  const rows = combos.map(([b, s]) => ({b, s, c: flipCalc(r, b, s)}));
+  const best = rows.filter(x => x.c.profit > 0).sort((x, y) => (y.c.pph ?? Infinity) - (x.c.pph ?? Infinity))[0];
+  return `<div class="tablewrap"><table class="cmp"><thead><tr><th class="l nosort">Weg</th><th class="nosort">Menge</th><th class="nosort">Gewinn</th><th class="nosort">Marge</th><th class="nosort">Dauer</th><th class="nosort">Profit pro Stunde</th><th class="nosort"></th></tr></thead><tbody>
+    ${rows.map(x => `<tr class="${calcPrefs.buy === x.b && calcPrefs.sell === x.s ? 'cur' : ''}" data-ccombo="${x.b}|${x.s}">
+      <td class="l">${MODE_NAMES[x.b]} → ${x.s === 'offer' ? 'Sell-Offer' : 'Instasell'}${best === x ? ' <span class="tag">am schnellsten im Plus</span>' : ''}</td>
+      <td>${NF0.format(x.c.qty)}</td><td class="${cls(x.c.profit)}">${fmt(x.c.profit)}</td><td class="${cls(x.c.margin)}">${pct(x.c.margin, false)}</td>
+      <td>${dur(x.c.tReal)}</td><td>${x.c.pph != null ? fmt(x.c.pph) : (x.c.tReal === 0 ? 'sofort' : '–')}</td>
+      <td>${calcPrefs.buy === x.b && calcPrefs.sell === x.s ? '<span class="mut">gewählt</span>' : '<button class="link">wählen</button>'}</td></tr>`).join('')}
+  </tbody></table></div>
+  <p class="hint">Dauer „realistisch“: Handel der letzten 7 Tage × dein Anteil von ${NF1.format(S.set.share)} %. „Bestenfalls“ heißt, deine Order bleibt die ganze Zeit ganz oben. Instabuy und Instasell sind sofort, kosten aber den Spread.</p>`;
+}
+function refreshCalc(full){
+  const r = S.byId[S.itemId], box = $('#fcalc'); if (!r || !box) return;
+  if (full){ box.innerHTML = calcSection(r); }
+  else {
+    const o = $('#cOut'); if (o) o.innerHTML = calcResult(r);
+    const cp = $('#cCompare'); if (cp) cp.innerHTML = calcCompare(r);
+    // Live-Preise nachziehen, solange nicht selbst eingetragen und nicht gerade getippt wird
+    const act = document.activeElement ? document.activeElement.id : '';
+    if (calcState.buyPx == null && act !== 'cBuy'){ const i = $('#cBuy'); if (i) i.value = NF1f.format(autoBuy(r)); }
+    if (calcState.sellPx == null && act !== 'cSell'){ const i = $('#cSell'); if (i) i.value = NF1f.format(autoSell(r)); }
+  }
+  const c = flipCalc(r, calcPrefs.buy, calcPrefs.sell);
+  const bn = $('#cBuyNote'); if (bn) bn.textContent = `Ø ${price(c.buyPx)} pro Stück über die günstigsten Sell-Offers.`;
+  const sn = $('#cSellNote'); if (sn) sn.textContent = `Ø ${price(c.sellPx)} pro Stück über die höchsten Buy-Orders.`;
 }
 function initAnalysis(){
   const el = $('#achart'); if (!el) return;
@@ -1213,7 +1385,7 @@ async function loadAnalysisChart(){
   ch.empty = chartPrefs.arange === 'local' ? 'Dieser Browser hat für dieses Item noch keine Preise gesammelt.' : 'Für diesen Zeitraum gibt es keine Daten.';
   ch.cofl = res.source === 'cofl'; ch.setData(res.data); livePoint(ch, id);
   $('#aSrc').innerHTML = sourceNote(res) + ' Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles.';
-  anaStats(); anaLegend(null);
+  anaStats(); anaLegend(null); refreshCalc(false);
 }
 function anaLegend(idx){
   const el = $('#aLegend'), ch = S.achart; if (!el || !ch) return;
@@ -1253,7 +1425,7 @@ function updateAnalysis(){
   const f = $('#aFig'); if (f) f.innerHTML = anaFigures(r);
   const b = $('#aBuy'); if (b) b.innerHTML = book(S.products[S.itemId].sell_summary, 'buy');
   const sl = $('#aSell'); if (sl) sl.innerHTML = book(S.products[S.itemId].buy_summary, 'sell');
-  if (document.activeElement && !['cQty','cBuy','cSell'].includes(document.activeElement.id)){ const o = $('#cOut'); if (o) o.innerHTML = calcOut(r); }
+  refreshCalc(false);
   livePoint(S.achart, S.itemId);
 }
 function setAnaTool(t){
@@ -1284,7 +1456,10 @@ function applyPreset(k){
   if (S.rows.length) ingest(false); else renderMain(true);
   if (S.drawer) renderDrawer();
 }
-function refreshControls(){ if (S.drawer) renderDrawer(); if (S.tab === 'settings') renderMain(true); }
+function refreshControls(){
+  if (S.drawer) renderDrawer(); if (S.tab === 'settings') renderMain(true);
+  document.querySelectorAll('#view [data-setv]').forEach(b => b.classList.toggle('on', String(S.set[b.dataset.setv]) === b.dataset.val));
+}
 function toggleWatch(id){
   const i = S.watch.indexOf(id);
   if (i >= 0) S.watch.splice(i, 1); else S.watch.push(id);
@@ -1313,6 +1488,24 @@ document.addEventListener('click', e => {
   if ((el = q('[data-mrange]'))){ chartPrefs.mrange = el.dataset.mrange; savePrefs(); loadModalChart(); return; }
   if ((el = q('[data-arange]'))){ chartPrefs.arange = el.dataset.arange; savePrefs(); loadAnalysisChart(); return; }
   if ((el = q('[data-tool]'))){ setAnaTool(el.dataset.tool); return; }
+  if ((el = q('[data-cset]'))){ calcPrefs[el.dataset.cset] = el.dataset.val; saveCalc(); refreshCalc(true); return; }
+  if ((el = q('[data-ccombo]'))){ const [b, s2] = el.dataset.ccombo.split('|'); calcPrefs.buy = b; calcPrefs.sell = s2; saveCalc(); refreshCalc(true); return; }
+  if ((el = q('[data-creset]'))){ calcState[el.dataset.creset === 'buy' ? 'buyPx' : 'sellPx'] = null; refreshCalc(true); return; }
+  if ((el = q('[data-ccopy]'))){
+    const r = S.byId[S.itemId]; if (!r) return;
+    const v = el.dataset.ccopy === 'buy' ? orderPx(r, 'buy') : orderPx(r, 'sell'), txt = String(r1(v));   // so wie das Schild im Spiel ihn erwartet
+    const done = () => { el.textContent = 'Kopiert: ' + txt; setTimeout(() => el.textContent = 'Preis kopieren', 1600); };
+    (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(done).catch(() => { const ta = document.createElement('textarea'); ta.value = txt; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); done(); }catch{} ta.remove(); });
+    return;
+  }
+  if ((el = q('[data-cq]'))){
+    const [k, v] = el.dataset.cq.split(':'), r = S.byId[S.itemId]; if (!r) return;
+    if (k === 'b'){ calcPrefs.budget = v === 'set' ? S.set.budget : +v; }
+    else if (v === 'budget') calcPrefs.qty = Math.max(1, Math.floor(S.set.budget / orderPx(r, 'buy')));
+    else if (v === 'order') calcPrefs.qty = MAX_ORDER;
+    else calcPrefs.qty = +v;
+    saveCalc(); refreshCalc(true); return;
+  }
   if ((el = q('[data-craft]'))){ openCraft(+el.dataset.craft); return; }
   if ((el = q('[data-open]'))){ openDetail(el.dataset.open); return; }
   if (t.id === 'modal'){ closeDetail(); return; }
@@ -1362,7 +1555,17 @@ document.addEventListener('click', e => {
 document.addEventListener('input', e => {
   const t = e.target;
   if (t.id === 'search'){ S.search = t.value; S.pageNo[S.tab] = 0; renderMain(); return; }
-  if (['cQty','cBuy','cSell'].includes(t.id)){ const r = S.byId[S.itemId]; if (r) $('#cOut').innerHTML = calcOut(r); return; }
+  if (t.dataset.cin){
+    const k = t.dataset.cin, v = parseCoins(t.value.replace('%', ''));
+    const ok = isFinite(v) && v >= 0;
+    t.parentElement.classList.toggle('bad', !ok && t.value.trim() !== '');
+    if (k === 'buyPx') calcState.buyPx = ok && v > 0 ? v : null;
+    else if (k === 'sellPx') calcState.sellPx = ok && v > 0 ? v : null;
+    else if (ok){ calcPrefs[k] = v; saveCalc(); }
+    refreshCalc(false);
+    if (k === 'buyPx' || k === 'sellPx'){ const n = $('#c' + (k === 'buyPx' ? 'buy' : 'sell') + 'Live'); const r = S.byId[S.itemId]; if (n && r) n.innerHTML = (calcState[k] != null ? `Eigener Preis. Live: ${NF1f.format(k === 'buyPx' ? autoBuy(r) : autoSell(r))} <button class="link" data-creset="${k === 'buyPx' ? 'buy' : 'sell'}">Live-Preis nehmen</button>` : 'Automatisch.') + ` <button class="link" data-ccopy="${k === 'buyPx' ? 'buy' : 'sell'}">Preis kopieren</button>`; }
+    return;
+  }
   if (t.dataset.slider){
     const key = t.dataset.slider, c = SLIDERS[key], v = c.steps[+t.value];
     t.style.setProperty('--p', (t.value / (c.steps.length - 1) * 100).toFixed(1) + '%');
