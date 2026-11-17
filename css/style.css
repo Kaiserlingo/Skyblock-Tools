@@ -352,6 +352,8 @@ body{transition:background-color .2s}
 .legendrow .i1{color:var(--ind1)}.legendrow .i2{color:var(--ind2)}.legendrow .i3{color:var(--ind3)}
 .ana-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:40px 56px;margin-top:40px}
 .ana-grid section > h2{font-size:16px;font-weight:600;margin:0 0 4px;padding-bottom:8px;border-bottom:1px solid var(--ink)}
+.ana-grid section > .note{margin:6px 0 4px}
+.ana-grid section{min-width:0}
 .ana-grid .facts{grid-template-columns:1fr 1fr}
 .ana-grid .wide{grid-column:1/-1}
 .calc{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0 6px}
@@ -393,3 +395,34 @@ table.cmp tr.cur td{background:var(--emerald-soft)}
 table.cmp .tag{display:inline-block;margin-left:8px;font-size:12px;color:var(--emerald);border:1px solid var(--emerald);border-radius:4px;padding:0 6px}
 @media (max-width:900px){ .fc-grid{grid-template-columns:1fr} .fc-out .facts{grid-template-columns:1fr} }
 .seg.full{display:flex}.seg.full button{flex:1}
+
+/* ---------- Feinschliff Layout ---------- */
+.hidem{}
+.wordmark{white-space:nowrap}
+.cols section,.rank li,.ana-grid section,.fc-out,.fc-in{min-width:0}
+.cols section > header{flex-wrap:wrap}
+.item .sub{max-width:100%}
+td.l .item{max-width:340px}
+td.l .item .txt{overflow:hidden}
+.facts dd{white-space:nowrap}
+.facts dt{min-width:0}
+.receipt b{white-space:nowrap}
+@media (max-width:640px){
+  .hidem,#statusTxt{display:none}
+  .status{margin-right:0}
+  .themebtn{padding:0 8px}
+  .facts,.ana-grid .facts,.fc-out .facts{grid-template-columns:1fr}
+  .facts dd{white-space:normal;text-align:right}
+  .facts dd small{display:block}
+  td.l .item{max-width:220px}
+  .drawtools button{padding:5px 8px;font-size:13px}
+  .ahead h1{font-size:26px}
+  .lead.small{font-size:22px}
+}
+/* Tabellen passen sich mittleren Breiten an */
+th{white-space:normal;line-height:1.3}
+th:not(.l){min-width:64px}
+@media (max-width:1200px){
+  td.l .item{max-width:240px}
+  th,td{padding-left:9px;padding-right:9px}
+}

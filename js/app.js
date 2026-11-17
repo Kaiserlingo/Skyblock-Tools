@@ -129,14 +129,14 @@ const NF0 = nf(0), NF1 = nf(1), NF1f = nf(1,1), NF2 = nf(2);
 function fmt(n){
   if (n == null || !isFinite(n)) return '–';
   const a = Math.abs(n);
-  if (a >= 1e9) return NF2.format(n/1e9) + ' B';
-  if (a >= 1e6) return NF2.format(n/1e6) + ' M';
-  if (a >= 1e4) return NF1.format(n/1e3) + ' k';
+  if (a >= 1e9) return NF2.format(n/1e9) + '\u00a0B';
+  if (a >= 1e6) return NF2.format(n/1e6) + '\u00a0M';
+  if (a >= 1e4) return NF1.format(n/1e3) + '\u00a0k';
   if (a >= 100) return NF0.format(n);
   return NF1.format(n);
 }
-function price(n){ return (n == null || !isFinite(n) || n === 0) ? '–' : (Math.abs(n) >= 1e6 ? fmt(n) : NF1f.format(n)); }
-function pct(n, sign=true){ if (n == null || !isFinite(n)) return '–'; return (sign && n > 0 ? '+' : '') + NF1.format(n) + ' %'; }
+function price(n){ return (n == null || !isFinite(n) || n === 0) ? '–' : (Math.abs(n) >= 1e9 ? fmt(n) : NF1f.format(n)); }
+function pct(n, sign=true){ if (n == null || !isFinite(n)) return '–'; return (sign && n > 0 ? '+' : '') + NF1.format(n) + '\u00a0%'; }
 function cls(n){ return n > 0 ? 'pos' : n < 0 ? 'neg' : 'mut'; }
 function ago(ms){ const s = Math.round(ms/1000); if (s < 60) return s + ' s'; const m = Math.round(s/60); if (m < 60) return m + ' min'; return NF1.format(m/60) + ' h'; }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -162,7 +162,7 @@ function rarityColor(id){
   return RARITY.COMMON;
 }
 function itemCell(id, name, sub, risk){
-  return `<div class="item"><i class="rar" style="--rc:${rarityColor(id)}"></i><div class="txt"><div class="nm">${esc(name)}${risk && risk.length ? `<span class="warn" title="${esc(risk.join('\n'))}">!</span>` : ''}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div></div>`;
+  return `<div class="item"><i class="rar" style="--rc:${rarityColor(id)}"></i><div class="txt"><div class="nm" title="${esc(name)}">${esc(name)}${risk && risk.length ? `<span class="warn" title="${esc(risk.join('\n'))}">!</span>` : ''}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div></div>`;
 }
 
 /* =========================================================
@@ -631,8 +631,8 @@ function spark(id, W=88, H=22, n=120){
 function words(v){
   if (v == null || !isFinite(v)) return '–';
   const a = Math.abs(v);
-  if (a >= 1e9) return NF2.format(v/1e9) + ' Mrd.';
-  if (a >= 1e6) return NF2.format(v/1e6) + ' Mio.';
+  if (a >= 1e9) return NF2.format(v/1e9) + '\u00a0Mrd.';
+  if (a >= 1e6) return NF2.format(v/1e6) + '\u00a0Mio.';
   if (a >= 1e3) return NF0.format(Math.round(v/100)*100);
   return NF1.format(v);
 }
@@ -928,7 +928,7 @@ function renderDetail(update){
   if (!r || !p) return;
   const h = S.hist[id];
   const top = figures([
-    ['Instabuy', price(r.topSell)], ['Instasell', price(r.topBuy)],
+    ['Instabuy', `<span class="amber">${price(r.topSell)}</span>`], ['Instasell', `<span class="pos">${price(r.topBuy)}</span>`],
     ['Flip-Gewinn pro Stück', `<span class="${cls(r.profit)}">${price(r.profit)}</span>`], ['Profit pro Stunde', fmt(r.pph)],
   ]);
   const more = facts([
@@ -1148,16 +1148,16 @@ PAGES.item = function(){
     <section class="fcalc" id="fcalc">${calcSection(r)}</section>
 
     <div class="ana-grid">
+      <section><h2>Buy-Orders</h2><p class="note">Hier landet deine Buy-Order. Höchster Preis oben.</p><div id="aBuy">${book(S.products[id].sell_summary, 'buy')}</div></section>
+      <section><h2>Sell-Offers</h2><p class="note">Hier landet deine Sell-Offer. Niedrigster Preis oben.</p><div id="aSell">${book(S.products[id].buy_summary, 'sell')}</div></section>
       <section><h2>Im gewählten Zeitraum</h2><div id="aStats"><p class="mut">Lädt …</p></div></section>
-      <section><h2>Buy-Orders</h2><div id="aBuy">${book(S.products[id].sell_summary, 'buy')}</div></section>
-      <section><h2>Sell-Offers</h2><div id="aSell">${book(S.products[id].buy_summary, 'sell')}</div></section>
-      <section class="wide"><h2>Preisalarm</h2>
+      <section><h2>Preisalarm</h2>
         <div class="alertrow">
           <select id="alCond" aria-label="Bedingung">${Object.entries(CONDS).map(([k,c]) => `<option value="${k}">${c.label}</option>`).join('')}</select>
           <div class="input"><input id="alVal" inputmode="decimal" placeholder="z. B. 1,5k" value="${r.topSell ? coinText(r1(r.topSell)) : ''}" aria-label="Wert in Coins"><span class="unit">Coins</span></div>
           <button class="btn primary" data-act="addalert">Alarm anlegen</button>
         </div>
-        ${alerts.length ? `<ul class="alertlist">${alerts.map(({a,i}) => `<li>${CONDS[a.cond].label} ${price(a.value)} <button class="link danger" data-delalert="${i}">löschen</button></li>`).join('')}</ul>` : ''}
+        ${alerts.length ? `<ul class="alertlist">${alerts.map(({a,i}) => `<li>${CONDS[a.cond].label} ${price(a.value)} <button class="link danger" data-delalert="${i}">löschen</button></li>`).join('')}</ul>` : '<p class="note" style="margin-top:10px">Du bekommst eine Meldung mit Ton, sobald die Bedingung erfüllt ist – solange die Seite offen ist.</p>'}
       </section>
     </div>
   </div>`;
