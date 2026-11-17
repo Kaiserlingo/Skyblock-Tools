@@ -1,25 +1,8 @@
 # SkyBlock Hub
 
-Persönliche Tool-Sammlung für **Hypixel SkyBlock**, als statische Website über GitHub Pages.
+Persönliche Tool-Sammlung für **Hypixel SkyBlock**
 
 **Live:** https://kaiserlingo.github.io/Skyblock-Tools/
-
-## Aufbau der Seite
-
-- **Startbildschirm** – Auswahl der Tools (aktuell: Bazaar Flipper)
-- **Bazaar Flipper** – Übersicht, Flips, Craft-Flips (nur Bazaar), NPC-Flips, Markt, Watchlist & Alarme, Einstellungen
-
-## Strategien
-
-| | 🛡 Sicher | ⚖ Ausgewogen | 🔥 Riskant |
-|---|---|---|---|
-| Min. Stück/h (beide Seiten) | 500 | 100 | 10 |
-| Min. Umsatz/h | 10 M | 2 M | 250 k |
-| Ausgeglichenheit Kauf/Verkauf | ≥ 50 % | ≥ 30 % | ≥ 10 % |
-| Marge | 1–20 % | 2–50 % | 5–300 % |
-| Min. Marge Craft-Flips | 2 % | 3 % | 5 % |
-| Max. Preisbewegung (1 h) | ± 5 % | ± 10 % | egal |
-| Items mit ⚠ Warnung | ausgeblendet | ausgeblendet | sichtbar |
 
 ## Dateien
 
@@ -33,8 +16,6 @@ tools/stamp_assets.py      hängt Versions-Hashes an CSS/JS (vor jedem Commit au
 .github/workflows/         wöchentliches Rezept-Update
 ```
 
-**Neues Tool hinzufügen:** in `js/app.js` einen Eintrag in der `TOOLS`-Liste ergänzen
-(`id`, `icon`, `title`, `desc`, `tabs`). Es erscheint dann automatisch als Karte auf dem Startbildschirm.
 
 ## Datenquellen
 
