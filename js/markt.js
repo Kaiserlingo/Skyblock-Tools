@@ -1,0 +1,830 @@
+'use strict';
+/* =========================================================
+   Markt-Analyse – jedes SkyBlock-Item volks- und betriebswirtschaftlich
+   Nutzt aus app.js: S (Live-Bazaar), RECIPES, Formatierer (fmt, price, pct, esc, …), nav, renderMain.
+   Rechnet mit js/econ.js. Tagesdaten aller Bazaar-Items kommen aus market.json (GitHub Action).
+   ========================================================= */
+(function(){
+const E = window.Econ, DAY = E.DAY;
+const MD_URL = 'https://raw.githubusercontent.com/Kaiserlingo/Skyblock-Tools/data/market.json';
+const COFL = 'https://sky.coflnet.com/api/', HY = 'https://api.hypixel.net/v2/';
+const BZ_TAX = () => (S.set.tax || 1.25) / 100;
+const $ = s => document.querySelector(s);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const P = (x, sign = true) => x == null || !isFinite(x) ? '–' : pct(x * 100, sign);   // Anteile (0,05) als Prozent
+const PC = x => `<span class="${x == null ? 'mut' : cls(x)}">${P(x)}</span>`;
+const num = v => v != null && isFinite(v);
+const fdate = t => new Date(t).toLocaleDateString('de-AT', {day: 'numeric', month: 'short', year: 'numeric'});
+const fdt = t => new Date(t).toLocaleString('de-AT', {weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'});
+function until(ms){
+  if (ms <= 0) return 'jetzt';
+  const m = Math.round(ms / 60e3); if (m < 60) return 'in ' + m + ' min';
+  const h = Math.floor(m / 60); if (h < 48) return 'in ' + h + ' h' + (m % 60 ? ' ' + (m % 60) + ' min' : '');
+  return 'in ' + Math.round(h / 24) + ' Tagen';
+}
+const SEC_ORDER = ['MINING', 'FARMING', 'COMBAT', 'FORAGING', 'FISHING', 'DUNGEONS', 'ENCHANT', 'RIFT', 'OTHER'];
+
+/* ---------- Zustand ---------- */
+const K = {
+  md: null, mdErr: null, mdP: null,
+  hy: null, hyP: null, cat: null, catMap: null, catP: null,
+  election: null, fires: null, liveP: null,
+  chart: null, timer: null,
+  list: {q: '', mkt: 'trade', sec: 'all', sort: 'to', dir: -1, page: 0, preset: null},
+  idx: {range: 365, bands: true, marks: true, cmp: ''},
+  it: null, itRange: '1y', itBands: true, itMarks: true, mob: 'order', calc: {budget: 10e6, share: 10},
+};
+try{ Object.assign(K.calc, JSON.parse(localStorage.getItem('mk:calc') || '{}')); }catch{}
+
+/* ---------- Laden (mit Warteschlange, damit SkyCofl nicht überlastet wird) ---------- */
+const memo = new Map(), queue = []; let active = 0;
+function getJSON(url, ttl = 10 * 60e3){
+  const c = memo.get(url); if (c && Date.now() - c.at < ttl) return c.p;
+  const p = new Promise((res, rej) => { queue.push({url, res, rej}); pump(); });
+  memo.set(url, {at: Date.now(), p}); p.catch(() => memo.delete(url));
+  return p;
+}
+function pump(){
+  while (active < 3 && queue.length){
+    const j = queue.shift(); active++;
+    (async () => {
+      for (let k = 0; k < 3; k++){
+        try{
+          const r = await fetch(j.url);
+          if (r.status === 204) return [];
+          if (r.status === 429){ await sleep(2500 * (k + 1)); continue; }
+          if (r.status === 404) return null;
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return await r.json();
+        }catch(e){ if (k === 2) throw e; await sleep(700 * (k + 1)); }
+      }
+      throw new Error('zu viele Anfragen');
+    })().then(j.res, j.rej).finally(() => { active--; pump(); });
+  }
+}
+function loadMD(){
+  if (K.mdP) return K.mdP;
+  return K.mdP = fetch(MD_URL, {cache: 'no-cache'}).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(j => { if (!j || !j.index || !j.items) throw new Error('unvollständig'); K.md = j; K.mdT = Array.from({length: j.index.spi.length}, (_, i) => j.days.from + i * DAY); return j; })
+    .catch(e => { K.mdErr = e.message; K.mdP = null; throw e; });
+}
+function loadHy(){
+  if (K.hyP) return K.hyP;
+  return K.hyP = getJSON(HY + 'resources/skyblock/items', 6 * 3600e3).then(j => { const m = {}; for (const it of (j && j.items) || []) m[it.id] = Object.assign({}, it, {name: String(it.name || '').replace(/§./g, '')}); K.hy = m; return m; });
+}
+function loadCat(){
+  if (K.catP) return K.catP;
+  return K.catP = getJSON(COFL + 'items', 6 * 3600e3).then(a => { K.cat = Array.isArray(a) ? a : []; K.catMap = {}; for (const x of K.cat) K.catMap[x.tag] = x; return K.cat; });
+}
+function loadLive(){
+  if (K.liveP && Date.now() - K.liveAt < 120e3) return K.liveP;
+  K.liveAt = Date.now();
+  return K.liveP = Promise.allSettled([getJSON(HY + 'resources/skyblock/election', 60e3), getJSON(HY + 'skyblock/firesales', 60e3)])
+    .then(([e, f]) => { if (e.status === 'fulfilled' && e.value && e.value.success) K.election = e.value; if (f.status === 'fulfilled' && f.value && f.value.success) K.fires = f.value.sales || []; });
+}
+
+/* ---------- Item-Grunddaten ---------- */
+function nm(id){
+  const h = K.hy && K.hy[id]; if (h && h.name) return h.name;
+  const m = K.md && K.md.items[id]; if (m && m.n) return m.n;
+  const c = K.catMap && K.catMap[id]; if (c && c.name) return c.name;
+  return pretty(id);
+}
+function kind(id){
+  const bz = !!(S.products[id] || (K.md && K.md.items[id]));
+  const c = K.catMap && K.catMap[id];
+  return {bz, ah: !bz && !!(c && /AUCTION/.test(c.flags)), known: bz || !!c || !!(K.hy && K.hy[id]), flags: c ? c.flags : null};
+}
+function liveRow(id){ return S.byId && S.byId[id]; }
+function itemLink(id, sub){ return `<a class="mk-it" href="#markt/item/${encodeURIComponent(id)}">${itemCell(id, nm(id), sub)}</a>`; }
+function bandColor(name){ let h = 0; for (const c of String(name)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return `var(--band${h % 4 + 1})`; }
+function curMayor(){
+  const e = K.election && K.election.mayor, md = K.md;
+  const now = Date.now(), term = md && md.terms.find(t => t.start <= now && now < t.end);
+  if (e) return {name: e.name, key: e.key, perks: (e.perks || []).map(p => ({name: p.name, d: String(p.description || '').replace(/§./g, '')})), minister: e.minister ? {name: e.minister.name, perk: e.minister.perk && e.minister.perk.name, d: String(e.minister.perk && e.minister.perk.description || '').replace(/§./g, '')} : null, term};
+  if (md && md.election && md.election.mayor){ const m = md.election.mayor; return {name: m.name, perks: (m.perks || []).map(n => ({name: n})), minister: m.minister ? {name: m.minister} : null, term}; }
+  return null;
+}
+function nextMayorChange(now){ const ev = E.sbUpcoming(now, 12).find(x => x.key === 'mayor'); return ev ? ev.start : null; }
+function spiAt(){ return K.md ? K.md.index.spi : null; }
+
+/* =========================================================
+   Seiten
+   ========================================================= */
+function pageTitle(tab){
+  if (tab === 'item' && S.itemId) return nm(S.itemId) + ' – Analyse';
+  const t = MARKT_TABS.find(x => x.id === tab); return t ? t.label : 'Markt-Analyse';
+}
+function render(tab){
+  if (tab === 'item') return pageItem();
+  if (tab === 'items') return pageItems();
+  if (tab === 'updates') return pageUpdates();
+  if (tab === 'method') return pageMethod();
+  return pageStart();
+}
+function mount(tab){
+  K.tab = tab;
+  const needMD = loadMD().catch(() => {});
+  loadHy().catch(() => {}); loadLive().catch(() => {});
+  if (tab === 'items' || tab === 'item') loadCat().then(() => redraw()).catch(() => {});
+  if (tab === 'item'){ mountItem(); return; }
+  Promise.all([needMD, K.hyP, K.liveP]).then(() => { if (K.tab === tab && S.tool === 'markt') redraw(); });
+  if (tab === 'start') mountIndexChart();
+  clearInterval(K.timer); K.timer = setInterval(() => { if (S.tool === 'markt' && K.tab === 'start'){ const el = $('#mk-cal'); if (el) el.innerHTML = calendarHTML(); } }, 30e3);
+}
+function leave(){ clearInterval(K.timer); if (K.chart){ K.chart.destroy(); K.chart = null; } K.tab = null; K.it = null; }
+function update(){   // neue Bazaar-Daten (alle 20 s)
+  if (K.tab === 'item'){ if (K.it && K.it.ready) drawItem(true); return; }
+  if (K.tab === 'items') drawList();
+}
+function redraw(){
+  if (S.tool !== 'markt') return;
+  if (K.tab === 'start'){ const b = $('#mk-body'); if (b){ b.innerHTML = startBody(); } const l = $('#mk-lead'); if (l) l.innerHTML = startLead(); if (!K.chart) mountIndexChart(); else feedIndexChart(); }
+  else if (K.tab === 'items') drawList();
+  else if (K.tab === 'updates'){ const v = $('#mk-upd'); if (v) v.innerHTML = updatesBody(); }
+  else if (K.tab === 'item' && K.it && K.it.ready) drawItem(false);
+}
+function mdNote(){
+  if (K.md) return `Tagesdaten vom ${fdate(K.md.days.to)}, berechnet ${fdt(K.md.built)}.`;
+  if (K.mdErr) return 'Die Tagesdaten aller Items konnten gerade nicht geladen werden. Live-Preise funktionieren trotzdem.';
+  return 'Tagesdaten werden geladen …';
+}
+
+/* ---------- Übersicht ---------- */
+function pageStart(){
+  return `<div class="mk">
+    <h1 class="lead small" id="mk-lead">${startLead()}</h1>
+    <p class="summary">Der SkyBlock-Preisindex fasst die Preise der umsatzstärksten Bazaar-Items zusammen, so wie ein Verbraucherpreisindex den Warenkorb.
+      Steigt er, wird alles teurer: Coins verlieren an Wert. <a class="link" href="#markt/method">So wird gerechnet</a></p>
+    <section class="mk-block">
+      <header><h2>SkyBlock-Preisindex</h2>
+        <div class="seg sm" role="group" aria-label="Zeitraum">${[[30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-mkrange="${d}" class="${K.idx.range === d ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <label class="chk"><input type="checkbox" data-mkopt="bands" ${K.idx.bands ? 'checked' : ''}> Mayor-Amtszeiten</label>
+        <label class="chk"><input type="checkbox" data-mkopt="marks" ${K.idx.marks ? 'checked' : ''}> Updates</label>
+        <label class="chk">Vergleich <select data-mkcmp>${['', ...SEC_ORDER].map(s => `<option value="${s}" ${K.idx.cmp === s ? 'selected' : ''}>${s ? secLabel(s) : 'kein Sektor'}</option>`).join('')}</select></label>
+      </header>
+      <div class="mk-chart" id="mk-idx"></div>
+      <p class="hint" id="mk-idxnote">${mdNote()}</p>
+    </section>
+    <div id="mk-body">${startBody()}</div>
+  </div>`;
+}
+function secLabel(s){ return K.md && K.md.sectors[s] ? K.md.sectors[s].label : ({MINING: 'Bergbau', FARMING: 'Landwirtschaft', COMBAT: 'Kampf', FORAGING: 'Holz', FISHING: 'Fischerei', DUNGEONS: 'Dungeons', ENCHANT: 'Verzauberungen', RIFT: 'Rift', OTHER: 'Sonstiges'})[s] || s; }
+function startLead(){
+  const md = K.md, m = curMayor();
+  if (!md) return 'Wie entwickelt sich der SkyBlock-Markt?';
+  const c = E.change(md.index.spi, 30);
+  const a = c == null ? '' : Math.abs(c) < .005 ? 'In den letzten 30 Tagen sind die Preise im Schnitt gleich geblieben.' : `In den letzten 30 Tagen ist SkyBlock im Schnitt um ${P(Math.abs(c), false)} ${c > 0 ? 'teurer' : 'billiger'} geworden.`;
+  return a + (m ? ` Mayor ist gerade ${esc(m.name)}${m.minister ? `, Minister ${esc(m.minister.name)}` : ''}.` : '');
+}
+function mountIndexChart(){
+  const el = $('#mk-idx'); if (!el) return;
+  if (K.chart) K.chart.destroy();
+  const ch = K.chart = new PriceChart(el, {});
+  ch.labels = {hi: 'Preisindex', lo: 'Sektor'}; ch.fmt = v => v == null ? '–' : NF1.format(v);
+  ch.setIndicators({hi: true, lo: false, spread: false, volume: false});
+  ch.empty = K.mdErr ? 'Keine Tagesdaten verfügbar' : 'Lädt …';
+  feedIndexChart();
+}
+function feedIndexChart(){
+  const ch = K.chart, md = K.md; if (!ch || !md) return;
+  const n = md.index.spi.length, from = Math.max(0, n - 1 - K.idx.range), base = md.index.spi[from];
+  const sec = K.idx.cmp && md.index.sec[K.idx.cmp], sb = sec ? sec[from] : null;
+  const t = K.mdT.slice(from), hi = md.index.spi.slice(from).map(v => v == null || !base ? null : v / base * 100);
+  const lo = sec ? sec.slice(from).map(v => v == null || !sb ? null : v / sb * 100) : t.map(() => null);
+  ch.labels = {hi: 'Preisindex', lo: sec ? secLabel(K.idx.cmp) : 'Sektor'};
+  ch.setIndicators({hi: true, lo: !!sec, spread: false, volume: false});
+  ch.setData({t, hi, lo});
+  ch.setOverlays({bands: K.idx.bands ? md.terms.map(x => ({from: x.start, to: x.end, label: x.name, color: bandColor(x.name), alpha: .5})) : [],
+                  marks: K.idx.marks ? md.news.map(x => ({t: x.date, label: x.title.replace(/^SkyBlock\s*/, '')})) : []});
+  const note = $('#mk-idxnote');
+  if (note) note.innerHTML = `${mdNote()} Start des Zeitraums = 100. Index aus ${NF0.format(md.index.n)} Bazaar-Items mit mindestens ${words(md.indexMin || 2e7)} Coins Umsatz am Tag.${sec ? ` Sektor ${esc(secLabel(K.idx.cmp))}: ${NF0.format(md.sectors[K.idx.cmp].index)} Items.` : ''}`;
+}
+function startBody(){
+  const md = K.md;
+  if (!md) return `<p class="loading">${K.mdErr ? esc(mdNote()) : 'Marktdaten werden geladen …'}</p>`;
+  const spi = md.index.spi;
+  const secRows = SEC_ORDER.filter(s => md.index.sec[s]).map(s => { const v = md.index.sec[s]; return {s, c7: E.change(v, 7), c30: E.change(v, 30), c365: E.change(v, v.length - 1), n: md.sectors[s].index}; });
+  const movers = Object.entries(md.items).filter(([, o]) => o.liq && num(o.c7));
+  const up = movers.slice().sort((a, b) => b[1].c7 - a[1].c7).slice(0, 5), dn = movers.slice().sort((a, b) => a[1].c7 - b[1].c7).slice(0, 5);
+  const u = md.updates[0], m = curMayor(), fx = m && md.mayorFx[m.name];
+  const li = (id, sub, v, vs) => `<li data-mkitem="${esc(id)}">${itemCell(id, nm(id), sub)}<span class="v">${v}<small>${vs}</small></span></li>`;
+  return `
+  <div class="tablewrap mk-sec"><table>
+    <thead><tr><th class="l nosort">Sektor</th><th class="nosort">Items im Index</th><th class="nosort">7 Tage</th><th class="nosort">30 Tage</th><th class="nosort">1 Jahr</th></tr></thead>
+    <tbody>
+      <tr class="mk-total"><td class="l"><b>Gesamter Markt</b></td><td>${NF0.format(md.index.n)}</td><td>${PC(E.change(spi, 7))}</td><td>${PC(E.change(spi, 30))}</td><td>${PC(E.change(spi, spi.length - 1))}</td></tr>
+      ${secRows.map(r => `<tr data-mksec="${r.s}"><td class="l">${esc(secLabel(r.s))}</td><td>${NF0.format(r.n)}</td><td>${PC(r.c7)}</td><td>${PC(r.c30)}</td><td>${PC(r.c365)}</td></tr>`).join('')}
+    </tbody></table></div>
+  <div class="cols">
+    <section><header><h2>Politik: Mayor im Amt</h2><a class="link" href="#markt/updates">Alle Mayors</a></header>
+      ${m ? `<p class="mk-big">${esc(m.name)}${m.minister ? ` <span class="mut">mit Minister ${esc(m.minister.name)}</span>` : ''}</p>
+        <ul class="mk-perks">${m.perks.map(p => `<li><b>${esc(p.name)}</b>${p.d ? ` ${esc(p.d)}` : ''}</li>`).join('')}${m.minister && m.minister.perk ? `<li><b>${esc(m.minister.perk)}</b> (Minister)${m.minister.d ? ` ${esc(m.minister.d)}` : ''}</li>` : ''}</ul>
+        <p class="note">${m.term ? `Amtszeit bis ${fdt(m.term.end)} (${until(m.term.end - Date.now())}).` : (() => { const n = nextMayorChange(Date.now()); return n ? `Nächster Wechsel ${fdt(n)} (${until(n - Date.now())}).` : ''; })()}</p>
+        ${fx ? `<p class="note">In seinen letzten ${fx.terms} Amtszeiten ist der Markt im Schnitt ${fx.spi >= 0 ? 'um ' + P(fx.spi, false) + ' gestiegen' : 'um ' + P(-fx.spi, false) + ' gefallen'}. Am stärksten gegen den Markt gestiegen:</p>
+          <ul class="rank">${fx.top.slice(0, 3).map(r => li(r[0], `in ${r[2]} Amtszeiten, ${Math.round(r[3] * 100)} % davon gestiegen`, P(r[1]), 'gegenüber dem Markt')).join('')}</ul>` : ''}` : '<p class="loading">Lädt …</p>'}
+    </section>
+    <section><header><h2>Neuestes Update</h2><a class="link" href="#markt/updates">Alle Updates</a></header>
+      ${u ? `<p class="mk-big"><a class="link" href="${esc(u.link)}" target="_blank" rel="noopener">${esc(u.title)}</a> <span class="mut">${fdate(u.date)}</span></p>
+        ${u.spi.d1 == null ? `<p class="note">Die Wirkung ist ab ${fdate(u.date + 2 * DAY)} messbar, sobald SkyCofl die Tagesdaten hat.</p>` : `
+        <dl class="facts mk-3"><div><dt>Markt nach 1 Tag</dt><dd>${PC(u.spi.d1)}</dd></div><div><dt>nach 3 Tagen</dt><dd>${PC(u.spi.d3)}</dd></div><div><dt>nach 7 Tagen</dt><dd>${PC(u.spi.d7)}</dd></div></dl>
+        ${u.top.length ? `<ul class="rank">${u.top.slice(0, 3).map(r => li(r[0], 'gegenüber dem Markt, 7 Tage', P(r[1]), P(r[2]) + ' absolut')).join('')}</ul>` : `<p class="note">Die 7-Tage-Wirkung pro Item ist ab ${fdate(u.date + 8 * DAY)} messbar.</p>`}`}` : '<p class="loading">Lädt …</p>'}
+    </section>
+    <section><header><h2>Am stärksten gestiegen (7 Tage)</h2><button class="link" data-mkpreset="up7">Alle ansehen</button></header>
+      <ul class="rank">${up.map(([id, o]) => li(id, `${price(o.p)} Coins, ${words(o.to)} Umsatz am Tag`, P(o.c7), '7 Tage')).join('')}</ul></section>
+    <section><header><h2>Am stärksten gefallen (7 Tage)</h2><button class="link" data-mkpreset="dn7">Alle ansehen</button></header>
+      <ul class="rank">${dn.map(([id, o]) => li(id, `${price(o.p)} Coins, ${words(o.to)} Umsatz am Tag`, P(o.c7), '7 Tage')).join('')}</ul></section>
+    <section class="mk-wide"><header><h2>Kalender</h2><span class="mut" id="mk-sbnow"></span></header><div id="mk-cal">${calendarHTML()}</div></section>
+  </div>`;
+}
+function calendarHTML(){
+  const now = Date.now(), d = E.sbDate(now), evs = E.sbUpcoming(now, 7);
+  const fires = (K.fires || []).filter(f => f.end > now);
+  return `<p class="note">Heute im Spiel: ${d.day}. ${E.SB.MONTHS[d.month]}, Jahr ${d.year}, ${String(d.hour).padStart(2, '0')}:${String(d.minute).padStart(2, '0')}. Ein SkyBlock-Jahr dauert 124 Stunden.</p>
+    <ul class="mk-cal">${evs.map(e => `<li class="${e.running ? 'now' : ''}"><b>${esc(e.name)}</b><span>${e.running ? 'läuft gerade, endet ' + until(e.end - now) : fdt(e.start) + ', ' + until(e.start - now)}</span></li>`).join('')}</ul>
+    ${fires.length ? `<p class="note"><b>Firesale:</b> ${fires.map(f => `${esc(nm(f.item_id))} (${NF0.format(f.amount)} Stück, ${fdt(f.start)} bis ${fdt(f.end)})`).join('; ')}</p>` : ''}
+    <p class="note">Ereignisse ändern Angebot und Nachfrage auf Zeit. Beim Spooky Festival kommen viele Candy-Drops auf den Markt, im Traveling Zoo die Haustiere, im Late Winter die Geschenke von Jerry.</p>`;
+}
+
+/* ---------- Alle Items ---------- */
+const PRESETS = {
+  up30: {label: 'Gewinner 30 Tage', sort: 'c30', dir: -1, liq: true},
+  dn30: {label: 'Verlierer 30 Tage', sort: 'c30', dir: 1, liq: true},
+  up7: {label: 'Gewinner 7 Tage', sort: 'c7', dir: -1, liq: true},
+  dn7: {label: 'Verlierer 7 Tage', sort: 'c7', dir: 1, liq: true},
+  vol: {label: 'Stärkste Schwankung', sort: 'v30', dir: -1, liq: true},
+  calm: {label: 'Ruhigste Preise', sort: 'v30', dir: 1, liq: true},
+  mayor: {label: 'Hängt am Mayor', sort: 'my', dir: -1, liq: true},
+};
+function pageItems(){
+  const L = K.list;
+  return `<div class="mk">
+    <h1 class="lead small">Alle Items</h1>
+    <p class="summary">Bazaar-Items mit Tagesdaten und Kennzahlen, Auktionshaus-Items mit Live-Daten auf ihrer Analyseseite. Klick ein Item an, um es genau zu analysieren.</p>
+    <div class="toolbar">
+      <label class="input search ${L.q ? 'has' : ''}"><input id="msearch" type="search" placeholder="Item suchen, z. B. Hyperion" value="${esc(L.q)}" autocomplete="off"><button class="clear" data-mkclear aria-label="Suche leeren">×</button></label>
+      <div class="seg" role="group" aria-label="Markt">${[['trade', 'Alle handelbaren'], ['bz', 'Bazaar'], ['ah', 'Auktionshaus'], ['all', 'Alles']].map(([k, l]) => `<button data-mkmkt="${k}" class="${L.mkt === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <select class="mk-select" data-mksecsel aria-label="Sektor"><option value="all">Alle Sektoren</option>${SEC_ORDER.map(s => `<option value="${s}" ${L.sec === s ? 'selected' : ''}>${esc(secLabel(s))}</option>`).join('')}</select>
+    </div>
+    <div class="quick mk-presets">${Object.entries(PRESETS).map(([k, p]) => `<button data-mkpreset="${k}" class="${L.preset === k ? 'on' : ''}">${p.label}</button>`).join('')}</div>
+    <div id="mk-list"></div>
+  </div>`;
+}
+function listRows(){
+  const L = K.list, md = K.md, out = [], seen = new Set(), pre = L.preset && PRESETS[L.preset];
+  const cm = curMayor(), mname = cm && cm.name;
+  const add = (id, flags) => {
+    if (seen.has(id)) return; seen.add(id);
+    const o = md && md.items[id], bz = !!(o || S.products[id]), ah = !bz && /AUCTION/.test(flags || '');
+    if (L.mkt === 'bz' && !bz) return; if (L.mkt === 'ah' && !ah) return; if (L.mkt === 'trade' && !bz && !ah) return;
+    const r = liveRow(id), live = r && r.topBuy && r.topSell ? (r.topBuy + r.topSell) / 2 : null;
+    out.push({id, name: nm(id), bz, ah, sec: o ? o.s : null, p: live || (o && o.p) || null, c7: o ? o.c7 : null, c30: o ? o.c30 : null, c365: o ? o.c365 : null, v30: o ? o.v30 : null,
+              to: o ? o.to : null, liq: o ? o.liq : 0, my: o && o.my && mname && o.my[mname] && o.my[mname][1] >= 2 ? Math.abs(o.my[mname][0]) : null, myRaw: o && o.my && mname && o.my[mname] ? o.my[mname][0] : null});
+  };
+  if (md) for (const id in md.items) add(id, 'BAZAAR');
+  for (const id in S.products) add(id, 'BAZAAR');
+  if (K.cat) for (const c of K.cat) add(c.tag, c.flags);
+  let rows = out;
+  if (L.sec !== 'all') rows = rows.filter(r => r.sec === L.sec);
+  if (pre && pre.liq) rows = rows.filter(r => r.liq);
+  if (L.q){ const q = L.q.toLowerCase().trim(); rows = rows.filter(r => r.name.toLowerCase().includes(q) || r.id.toLowerCase().includes(q.replace(/\s+/g, '_'))); }
+  const k = L.sort, d = L.dir;
+  rows.sort((a, b) => { const x = a[k], y = b[k]; if (k === 'name') return x.localeCompare(y) * d; if (x == null && y == null) return a.name.localeCompare(b.name); if (x == null) return 1; if (y == null) return -1; return (x - y) * d; });
+  return rows;
+}
+function drawList(){
+  const el = $('#mk-list'); if (!el) return;
+  const rows = listRows(), L = K.list, ps = 50, pages = Math.max(1, Math.ceil(rows.length / ps));
+  if (L.page >= pages) L.page = pages - 1;
+  const slice = rows.slice(L.page * ps, L.page * ps + ps);
+  const th = (k, l, left) => `<th data-mksort="${k}" class="${left ? 'l ' : ''}${L.sort === k ? 'on' : ''}">${l}${L.sort === k ? `<span class="arr">${L.dir > 0 ? '↑' : '↓'}</span>` : ''}</th>`;
+  const cm = curMayor();
+  el.innerHTML = `<p class="hint mk-count">${NF0.format(rows.length)} Items${!K.cat ? ' (Auktionshaus-Liste lädt …)' : ''}. ${mdNote()}</p>
+    <div class="tablewrap"><table class="mk-table"><thead><tr>${th('name', 'Item', true)}<th class="l nosort">Markt</th>${th('p', 'Preis')}${th('c7', '7 Tage')}${th('c30', '30 Tage')}${th('c365', '1 Jahr')}${th('v30', 'Schwankung pro Tag')}${th('to', 'Umsatz pro Tag')}${L.preset === 'mayor' ? th('my', 'unter ' + esc(cm ? cm.name : 'Mayor')) : ''}</tr></thead>
+    <tbody>${slice.length ? slice.map(r => `<tr data-mkitem="${esc(r.id)}"><td class="l">${itemCell(r.id, r.name, r.sec ? esc(secLabel(r.sec)) : '')}</td><td class="l mut">${r.bz ? 'Bazaar' : r.ah ? 'Auktionshaus' : 'nicht handelbar'}</td>
+      <td>${r.p ? price(r.p) : '<span class="mut">–</span>'}</td><td>${PC(r.c7)}</td><td>${PC(r.c30)}</td><td>${PC(r.c365)}</td><td>${r.v30 == null ? '<span class="mut">–</span>' : P(r.v30, false)}</td><td>${r.to ? fmt(r.to) : '<span class="mut">–</span>'}</td>${L.preset === 'mayor' ? `<td>${PC(r.myRaw)}</td>` : ''}</tr>`).join('')
+      : `<tr class="emptyrow"><td colspan="8"><b>Nichts gefunden.</b> Prüf die Schreibweise oder wähl „Alles“.</td></tr>`}</tbody></table></div>
+    ${pages > 1 ? `<div class="pager"><button class="btn ghost" data-mkpg="-1" ${L.page === 0 ? 'disabled' : ''}>Zurück</button><span>Seite ${L.page + 1} von ${pages}</span><button class="btn ghost" data-mkpg="1" ${L.page >= pages - 1 ? 'disabled' : ''}>Weiter</button></div>` : ''}
+    <p class="hint">Preis: Bazaar-Items live als Mittelkurs. Veränderungen und Schwankung aus Tagesdaten, siehe <a class="link" href="#markt/method">So wird gerechnet</a>.${L.preset === 'mayor' ? ' „Unter Mayor“: Ø-Veränderung in seinen Amtszeiten gegenüber dem Markt, nur Items mit mindestens 2 Amtszeiten.' : ''}</p>`;
+}
+
+/* ---------- Updates & Mayors ---------- */
+function pageUpdates(){ return `<div class="mk"><h1 class="lead small">Wie Updates und Mayors den Markt bewegen</h1>
+  <p class="summary">Für jedes Update und jede Amtszeit wird gemessen, wie sich die Preise danach verändert haben. „Gegenüber dem Markt“ heißt: die Veränderung eines Items minus die Veränderung des Preisindex. So bleibt übrig, was am Item selbst lag. Ein Zusammenhang ist noch kein Beweis, dass das Update die Ursache war.</p>
+  <div id="mk-upd">${updatesBody()}</div></div>`; }
+function updatesBody(){
+  const md = K.md; if (!md) return `<p class="loading">${K.mdErr ? esc(mdNote()) : 'Marktdaten werden geladen …'}</p>`;
+  const li = (id, a, b) => `<li data-mkitem="${esc(id)}">${itemCell(id, nm(id), secLabel(md.items[id] ? md.items[id].s : 'OTHER'))}<span class="v">${a}<small>${b}</small></span></li>`;
+  const sel = K.mayorSel && md.mayorFx[K.mayorSel] ? K.mayorSel : (curMayor() || {}).name;
+  const mf = md.mayorFx[sel];
+  const cand = K.election && K.election.current && K.election.current.candidates;
+  const tot = cand ? cand.reduce((s, c) => s + (c.votes || 0), 0) : 0;
+  return `
+  <h2 class="sec">Updates</h2>
+  <div class="mk-upds">${md.updates.map(u => `<article class="mk-upd">
+    <header><h3><a class="link" href="${esc(u.link)}" target="_blank" rel="noopener">${esc(u.title)}</a></h3><span class="mut">${fdate(u.date)}</span></header>
+    ${u.spi.d1 == null ? `<p class="note">Noch zu frisch: Messbar ab ${fdate(u.date + 2 * DAY)}.</p>` : `
+    <dl class="facts mk-4"><div><dt>Markt nach 1 Tag</dt><dd>${PC(u.spi.d1)}</dd></div><div><dt>3 Tage</dt><dd>${PC(u.spi.d3)}</dd></div><div><dt>7 Tage</dt><dd>${PC(u.spi.d7)}</dd></div><div><dt>14 Tage</dt><dd>${PC(u.spi.d14)}</dd></div></dl>
+    <p class="mk-chips">${Object.entries(u.sec).filter(([, v]) => v != null).sort((a, b) => b[1] - a[1]).map(([s, v]) => `<span class="${cls(v)}">${esc(secLabel(s))} ${P(v)}</span>`).join('')}</p>
+    ${u.top.length ? `<p class="note">${NF0.format(u.big)} von ${NF0.format(u.n)} gut gehandelten Items haben sich in 7 Tagen um mehr als 10 % anders bewegt als der Markt.</p>
+    <div class="two"><div><h4 class="mk-h4">Gestiegen</h4><ul class="rank">${u.top.slice(0, 5).map(r => li(r[0], P(r[1]), P(r[2]) + ' absolut')).join('')}</ul></div>
+      <div><h4 class="mk-h4">Gefallen</h4><ul class="rank">${u.flop.slice(0, 5).map(r => li(r[0], P(r[1]), P(r[2]) + ' absolut')).join('')}</ul></div></div>` : ''}`}
+  </article>`).join('')}</div>
+
+  <h2 class="sec">Mayors</h2>
+  <p class="note mk-w">Jede Amtszeit dauert 124 Stunden. Gemessen wird der Ø-Preis in der Amtszeit gegenüber den 5 Tagen davor, im Vergleich zum Markt. Mayors wirken über ihre Perks: Mehr Drops oder mehr Fortune bedeuten mehr Angebot und meist fallende Preise, neue Aufgaben schaffen Nachfrage.</p>
+  ${cand && cand.length ? `<div class="mk-vote"><h3 class="mk-h4">Laufende Wahl (Jahr ${K.election.current.year})</h3>${cand.slice().sort((a, b) => b.votes - a.votes).map(c => `<div class="mk-vrow"><span>${esc(c.name)}</span><i style="--w:${tot ? (c.votes / tot * 100).toFixed(1) : 0}%"></i><b>${tot ? NF1.format(c.votes / tot * 100) + ' %' : '–'}</b>${md.mayorFx[c.name] ? `<button class="link" data-mkmayor="${esc(c.name)}">Was passiert unter ${esc(c.name)}?</button>` : ''}</div>`).join('')}</div>` : ''}
+  <div class="tablewrap"><table class="mk-table"><thead><tr><th class="l nosort">Mayor</th><th class="nosort">Amtszeiten im letzten Jahr</th><th class="nosort">Markt Ø</th><th class="l nosort">stärkster Sektor</th><th class="l nosort">schwächster Sektor</th></tr></thead><tbody>
+    ${Object.entries(md.mayorFx).sort((a, b) => b[1].terms - a[1].terms).map(([n, f]) => { const s = Object.entries(f.sec).filter(([, v]) => v != null).sort((a, b) => b[1] - a[1]); return `<tr data-mkmayor="${esc(n)}" class="${n === sel ? 'cur' : ''}"><td class="l"><b>${esc(n)}</b>${(curMayor() || {}).name === n ? ' <span class="mut">im Amt</span>' : ''}</td><td>${f.terms}</td><td>${PC(f.spi)}</td><td class="l">${s[0] ? esc(secLabel(s[0][0])) + ' ' + PC(s[0][1]) : '–'}</td><td class="l">${s.length ? esc(secLabel(s[s.length - 1][0])) + ' ' + PC(s[s.length - 1][1]) : '–'}</td></tr>`; }).join('')}
+  </tbody></table></div>
+  ${mf ? `<div class="two mk-mf"><div><h4 class="mk-h4">Unter ${esc(sel)} typischerweise gestiegen</h4><ul class="rank">${mf.top.map(r => li(r[0], P(r[1]), `${r[2]} Amtszeiten, ${Math.round(r[3] * 100)} % gestiegen`)).join('')}</ul></div>
+    <div><h4 class="mk-h4">Unter ${esc(sel)} typischerweise gefallen</h4><ul class="rank">${mf.flop.map(r => li(r[0], P(r[1]), `${r[2]} Amtszeiten, ${Math.round(r[3] * 100)} % gestiegen`)).join('')}</ul></div></div>
+    <p class="hint">Bei nur 2 bis 3 Amtszeiten kann ein einzelner Ausreißer das Ergebnis tragen. Je mehr Amtszeiten und je öfter gestiegen, desto belastbarer.</p>` : ''}
+
+  <h2 class="sec">Letzte Amtszeiten</h2>
+  <div class="tablewrap"><table class="mk-table"><thead><tr><th class="l nosort">Mayor</th><th class="l nosort">Minister</th><th class="l nosort">von</th><th class="l nosort">bis</th></tr></thead><tbody>
+    ${md.terms.slice(-12).reverse().map(t => `<tr class="static"><td class="l">${esc(t.name)}</td><td class="l">${t.minister ? esc(t.minister.name) + (t.minister.perk ? ` <span class="mut">${esc(t.minister.perk)}</span>` : '') : '–'}</td><td class="l">${fdt(t.start)}</td><td class="l">${fdt(t.end)}</td></tr>`).join('')}
+  </tbody></table></div>`;
+}
+
+/* ---------- So wird gerechnet ---------- */
+function pageMethod(){
+  const g = (t, vwl, sb) => `<div class="mk-g"><h3>${t}</h3><p>${vwl}</p><p class="mk-sb"><b>In SkyBlock:</b> ${sb}</p></div>`;
+  return `<div class="mk mk-method"><h1 class="lead small">So wird gerechnet</h1>
+  <p class="summary">Alle Zahlen kommen aus echten Spieldaten. Was gemessen ist, steht als Zahl da. Was eine Schätzung ist, steht als Schätzung da.</p>
+  <h2 class="sec">Datenquellen</h2>
+  <ul class="rules mk-w">
+    <li><b>Hypixel API</b>: Bazaar live (alle 20 Sekunden), Item-Liste mit NPC-Preisen, Mayor und Wahl, Patchnotes mit Datum, Firesales.</li>
+    <li><b>SkyCofl</b>: Preisverläufe für Bazaar und Auktionshaus, die günstigsten Sofortkauf-Angebote, die letzten Verkäufe, die Mayor-Historie. <i>Prices provided by SkyCofl.</i></li>
+    <li><b>Tagesdaten aller Bazaar-Items</b>: einmal am Tag automatisch berechnet (GitHub Action), damit alle Besucher dieselben Zahlen sehen. ${K.md ? 'Stand ' + fdt(K.md.built) + '.' : ''}</li>
+    <li><b>Rezepte</b>: aus dem NotEnoughUpdates-Repository, wöchentlich aktualisiert.</li>
+  </ul>
+  <h2 class="sec">Rechenregeln</h2>
+  <ul class="rules mk-w">
+    <li><b>Marktpreis eines Bazaar-Items pro Tag</b>: Instabuy- und Instasell-Preis, gewichtet mit den Stück, die zu diesem Preis gehandelt werden. Einzelne Preisspitzen (mehr als 3 robuste Standardabweichungen vom Median der umliegenden 7 Tage) werden durch diesen Median ersetzt.</li>
+    <li><b>Auktionshaus</b>: Kennzahlen rechnen mit dem günstigsten Verkauf pro Tag. Der Durchschnitt wird durch aufgewertete Exemplare (Sterne, Enchants, Reforges) verzerrt.</li>
+    <li><b>Preisindex</b>: gewichteter geometrischer Mittelwert der Preisveränderungen (wie bei Verbraucherpreisindizes). Gewicht = Umsatz in Coins, ein Item höchstens 8 %. Nur Items mit mindestens ${words((K.md && K.md.indexMin) || 2e7)} Coins Umsatz am Tag, mindestens 100 Instabuys und 100 Instasells am Tag und Daten an 95 % der Tage.</li>
+    <li><b>Wirkung eines Updates</b>: Preis am Tag vor dem Update gegenüber 1, 3, 7 und 14 Tagen danach. Bei Items zusätzlich minus Index („gegenüber dem Markt“).</li>
+    <li><b>Wirkung eines Mayors</b>: Ø-Preis in den vollen Tagen der Amtszeit gegenüber den 5 Tagen davor, minus dieselbe Rechnung für den Index. Mittelwert über alle Amtszeiten im letzten Jahr.</li>
+    <li><b>Schwankung (Volatilität)</b>: Standardabweichung der täglichen Log-Renditen der letzten 30 Tage.</li>
+    <li><b>Value at Risk 95 %</b>: an 95 von 100 Tagen fiel der Preis nicht stärker als dieser Wert (aus dem letzten Jahr gemessen). Expected Shortfall: Ø-Verlust an den übrigen 5 %.</li>
+    <li><b>Preiselastizität</b>: Regression von ln(Wochenmenge) auf ln(Ø-Wochenpreis), nicht überlappende Wochen. Mit 95-%-Konfidenzintervall.</li>
+  </ul>
+  <h2 class="sec">Volks- und Betriebswirtschaft, auf SkyBlock übertragen</h2>
+  <div class="mk-gloss">
+    ${g('Angebot und Nachfrage', 'Der Preis entsteht dort, wo Anbieter und Käufer zusammenkommen.', 'Die Buy-Orders im Bazaar sind die Nachfragekurve, die Sell-Offers die Angebotskurve. Dazwischen liegt der Spread. Instabuys und Instasells sind die Geschäfte, die wirklich zustande kommen.')}
+    ${g('Preiselastizität', 'Wie stark ändert sich die Menge, wenn sich der Preis ändert? Über 1 heißt elastisch, unter 1 unelastisch.', 'Unelastisch sind Items, die man unbedingt braucht (z. B. für Upgrades oder Essenz für Sterne). Elastisch sind Items mit Ersatz, etwa wenn es ein günstigeres Rezept gibt.')}
+    ${g('Preisuntergrenze', 'Ein Mindestpreis, unter den der Preis nicht dauerhaft fallen kann.', 'Der NPC-Verkaufspreis. Fällt der Bazaar-Preis darunter, kauft jeder und verkauft an den NPC (Arbitrage), bis der Preis wieder steigt.')}
+    ${g('Preisobergrenze durch Herstellung', 'Ist Selbermachen billiger als Kaufen, steigt das Angebot.', 'Die Herstellkosten aus dem Rezept. Liegt der Preis darüber, lohnt Craften, mehr Ware kommt auf den Markt und der Preis sinkt Richtung Kosten.')}
+    ${g('Inflation', 'Steigt das allgemeine Preisniveau, verliert Geld an Kaufkraft.', 'Coins entstehen ständig neu (Mob-Drops, NPC-Verkäufe, Minions) und verschwinden über Coin-Sinks (Bazaar-Steuer, Auktionsgebühren, NPC-Käufe, Upgrades). Der Preisindex misst, was am Ende übrig bleibt.')}
+    ${g('Angebotsschock', 'Ein plötzlicher Anstieg oder Einbruch des Angebots verschiebt den Preis.', 'Ein Update, das Drop-Raten erhöht, oder ein Mayor mit Fortune-Perk bringt mehr Ware. Ein Nerf oder ein neues Rezept, das ein Item verbraucht, verknappt es.')}
+    ${g('Marktstruktur und Wettbewerb', 'Viele kleine Anbieter bedeuten Wettbewerb, wenige große bedeuten Marktmacht. Gemessen mit dem Herfindahl-Index (HHI): unter 0,15 viel Wettbewerb, über 0,25 konzentriert.', 'Wie verteilt sich die Menge im Orderbuch auf die Preisstufen? Steht fast alles in einer Order, kann ein Spieler den Preis bestimmen.')}
+    ${g('Saisonalität', 'Wiederkehrende Muster nach Wochentag oder Uhrzeit.', 'Am Wochenende und am Abend spielen mehr Leute: mehr Angebot aus dem Grinden, mehr Nachfrage nach Upgrades.')}
+    ${g('Politik', 'Regierungen setzen Rahmenbedingungen, die Märkte verändern.', 'Mayor und Minister ändern alle 124 Stunden die Regeln: mehr Mining Fortune unter Cole, Mythological Ritual unter Diana, Fishing Festival unter Marina.')}
+    ${g('Make-or-Buy', 'Selbst herstellen oder einkaufen? Entscheidend sind die Kosten.', 'Für jede Zutat wird der günstigere Weg gewählt: kaufen oder selbst craften (bis 4 Stufen tief).')}
+    ${g('Deckungsbeitrag und Break-even', 'Erlös minus variable Kosten. Break-even ist der Preis, ab dem man nichts verliert.', 'Erlös nach Bazaar-Steuer bzw. Auktionsgebühren minus Kosten der Zutaten. Fixkosten gibt es im Spiel kaum.')}
+    ${g('Kapitalbindung und Kapitalumschlag', 'Wie viel Geld steckt wie lange im Geschäft?', 'Coins, die in offenen Buy-Orders und unverkaufter Ware stecken. Je schneller ein Durchlauf, desto öfter arbeitet dasselbe Geld pro Tag.')}
+    ${g('Risiko und Beta', 'Wie stark schwankt ein Wert, und wie sehr hängt er am Gesamtmarkt?', 'Beta über 1: das Item schwankt stärker als der Markt. Beta nahe 0: eigene Gesetze, etwa durch ein Update nur für dieses Item.')}
+    ${g('Produktlebenszyklus', 'Einführung, Wachstum, Reife, Rückgang.', 'Neue Items starten teuer und knapp. Dann wird mehr gefarmt, der Preis fällt. Wird ein Item durch ein besseres ersetzt, schrumpft die Menge.')}
+    ${g('Opportunitätskosten', 'Was entgeht dir, weil du dein Geld anders einsetzt?', 'Wer Coins in einem Item hält, verzichtet auf andere Flips. Darum wird die Rendite immer mit dem Preisindex verglichen.')}
+  </div></div>`;
+}
+
+/* =========================================================
+   Item-Analyse
+   ========================================================= */
+function pageItem(){
+  const id = S.itemId;
+  return `<div class="mk mk-item">
+    <p class="crumbline"><a class="link" href="#markt/items">Alle Items</a></p>
+    <div id="mi-head">${itemHead(id)}</div>
+    <section class="mk-block">
+      <header><h2>Preisverlauf</h2>
+        <div class="seg sm" role="group" aria-label="Zeitraum">${[['14d', '14 Tage'], ['1y', '1 Jahr'], ['all', 'Alles']].map(([k, l]) => `<button data-mirange="${k}" class="${K.itRange === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <label class="chk"><input type="checkbox" data-miopt="bands" ${K.itBands ? 'checked' : ''}> Mayor-Amtszeiten</label>
+        <label class="chk"><input type="checkbox" data-miopt="marks" ${K.itMarks ? 'checked' : ''}> Updates</label>
+      </header>
+      <div class="mk-chart tall" id="mi-chart"></div>
+      <p class="hint" id="mi-cnote"></p>
+    </section>
+    <div id="mi-body"><p class="loading">Daten werden geladen …</p></div>
+  </div>`;
+}
+function itemHead(id){
+  const h = K.hy && K.hy[id], k = kind(id), r = liveRow(id), I = K.it && K.it.id === id ? K.it : null;
+  const tier = h && h.tier ? title(h.tier) : (S.tiers[id] ? title(S.tiers[id]) : '');
+  const cat = h && h.category ? title(h.category) : '';
+  let px = '';
+  if (k.bz && r && (r.topBuy || r.topSell)) px = `<dl class="figures mk-fig"><div><dt>Instabuy</dt><dd class="amber">${price(r.topSell)}</dd></div><div><dt>Instasell</dt><dd class="pos">${price(r.topBuy)}</dd></div><div><dt>Spread</dt><dd>${r.topBuy && r.topSell ? P((r.topSell - r.topBuy) / r.topSell, false) : '–'}</dd></div><div><dt>Umsatz pro Tag</dt><dd>${fmt(((r.wBuy || 0) + (r.wSell || 0)) * (r.topBuy || r.topSell) / 7)}</dd></div></dl>`;
+  else if (I && I.ah && I.ah.cur) px = `<dl class="figures mk-fig"><div><dt>Günstigster Sofortkauf</dt><dd class="amber">${I.ah.cur.buy ? price(I.ah.cur.buy) : '–'}</dd></div><div><dt>Median der Verkäufe</dt><dd>${I.ah.stats && I.ah.stats.median ? price(I.ah.stats.median) : '–'}</dd></div><div><dt>Verkäufe pro Tag</dt><dd>${I.ah.sold && I.ah.sold.perDay != null ? NF1.format(I.ah.sold.perDay) : '–'}</dd></div><div><dt>Angebote jetzt</dt><dd>${I.ah.cur.available != null ? NF0.format(I.ah.cur.available) : '–'}</dd></div></dl>`;
+  return `<div class="ahead"><div><h1>${esc(nm(id))}</h1>
+    <p class="sub">${[esc(id), tier, cat, k.bz ? 'Bazaar' : k.ah ? 'Auktionshaus' : k.known ? 'nicht handelbar' : ''].filter(Boolean).join(', ')}</p></div>
+    <div class="btnrow"><button class="btn ghost" data-mkcopy="${esc(nm(id))}">Name kopieren</button>${k.bz ? `<a class="btn ghost" href="#bazaar/item/${encodeURIComponent(id)}">Im Flipper öffnen</a>` : ''}</div></div>${px}`;
+}
+async function mountItem(){
+  const id = S.itemId, I = K.it = {id, ready: false, err: [], series: {}};
+  if (K.chart){ K.chart.destroy(); K.chart = null; }
+  const el = $('#mi-chart');
+  if (el){ const ch = K.chart = new PriceChart(el, {}); ch.empty = 'Lädt …'; ch.setIndicators({hi: true, lo: true, spread: true, volume: true}); }
+  await Promise.allSettled([loadMD(), loadHy(), loadCat(), K.liveP]);
+  if (K.it !== I) return;
+  const k = I.k = kind(id);
+  const now = Date.now(), y = new Date(now - 366 * DAY).toISOString(), n = new Date(now).toISOString();
+  const enc = encodeURIComponent(id);
+  try{
+    if (k.bz){
+      const [h1, h14] = await Promise.all([getJSON(COFL + `bazaar/${enc}/history?start=${y}&end=${n}`, 30 * 60e3), getJSON(COFL + `bazaar/${enc}/history?start=${new Date(now - 14 * DAY).toISOString()}&end=${n}`, 5 * 60e3).catch(() => null)]);
+      I.h1 = bzPoints(h1); I.h14 = bzPoints(h14);
+    } else if (k.ah){
+      const [full, week, stats, cur, bins, sold] = await Promise.allSettled([
+        getJSON(COFL + `item/price/${enc}/history/full`, 60 * 60e3), getJSON(COFL + `item/price/${enc}/history/week`, 10 * 60e3),
+        getJSON(COFL + `item/price/${enc}`, 5 * 60e3), getJSON(COFL + `item/price/${enc}/current`, 60e3),
+        getJSON(COFL + `auctions/tag/${enc}/active/bin`, 60e3), getJSON(COFL + `auctions/tag/${enc}/sold`, 5 * 60e3)]);
+      const v = x => x.status === 'fulfilled' ? x.value : null;
+      I.hAll = ahPoints(v(full)); I.h1 = I.hAll.filter(p => p.t >= now - 366 * DAY); I.h14 = ahPoints(v(week));
+      I.ah = {stats: v(stats), cur: v(cur), bins: Array.isArray(v(bins)) ? v(bins) : [], sold: soldStats(v(sold))};
+    }
+  }catch(e){ I.err.push(e.message); }
+  if (K.it !== I) return;
+  I.ready = true;
+  drawItem(false); feedItemChart();
+}
+function bzPoints(h){
+  return (Array.isArray(h) ? h : []).map(o => ({t: E.parseUtc(o.timestamp), buy: +o.buy || null, sell: +o.sell || null, v: E.bazaarPrice(o), bmw: +o.buyMovingWeek || 0, smw: +o.sellMovingWeek || 0, bv: o.buyVolume, sv: o.sellVolume}))
+    .filter(p => isFinite(p.t)).sort((a, b) => a.t - b.t);
+}
+function ahPoints(h){
+  return (Array.isArray(h) ? h : []).map(o => ({t: E.parseUtc(o.time), min: +o.min || null, max: +o.max || null, avg: +o.avg || null, vol: +o.volume || 0, v: +o.min || null}))
+    .filter(p => isFinite(p.t)).sort((a, b) => a.t - b.t);
+}
+function soldStats(a){
+  if (!Array.isArray(a) || !a.length) return null;
+  const s = a.map(x => ({p: +x.highestBidAmount || +x.startingBid, t: E.parseUtc(x.end), seller: x.auctioneerId, clean: (x.enchantments === '[]' || !x.enchantments || (Array.isArray(x.enchantments) && !x.enchantments.length)) && !x.reforge, count: x.count || 1}))
+    .filter(x => x.p > 0 && isFinite(x.t)).map(x => Object.assign(x, {p: x.p / x.count}));
+  if (!s.length) return null;
+  const t0 = Math.min(...s.map(x => x.t)), t1 = Math.max(...s.map(x => x.t)), span = Math.max((t1 - t0) / DAY, 1 / 24);
+  const ps = s.map(x => x.p), clean = s.filter(x => x.clean).map(x => x.p);
+  const by = {}; for (const x of s) by[x.seller] = (by[x.seller] || 0) + 1;
+  const shares = Object.values(by).map(c => c / s.length);
+  return {n: s.length, span, perDay: s.length / span, q10: E.quantile(ps, .1), q50: E.median(ps), q90: E.quantile(ps, .9), cleanN: clean.length, cleanMed: E.median(clean),
+          cv: E.sd(ps) / E.mean(ps), sellers: shares.length, hhi: shares.reduce((x, y) => x + y * y, 0), top: Math.max(...shares), list: s};
+}
+function feedItemChart(){
+  const ch = K.chart, I = K.it; if (!ch || !I || !I.ready) return;
+  const r = K.itRange, md = K.md;
+  let pts = r === '14d' ? I.h14 : r === 'all' ? I.hAll : I.h1;
+  if (r === 'all' && !I.hAll && I.k.bz){
+    ch.empty = 'Lädt …'; ch.setData({t: []});
+    getJSON(COFL + `bazaar/${encodeURIComponent(I.id)}/history?start=2019-06-01T00:00:00Z&end=${new Date().toISOString()}`, 60 * 60e3)
+      .then(h => { if (K.it !== I) return; I.hAll = bzPoints(h); feedItemChart(); }).catch(() => { ch.empty = 'Konnte nicht geladen werden'; ch.setData({t: []}); });
+    return;
+  }
+  pts = pts || [];
+  ch.empty = I.k.bz || I.k.ah ? 'Keine Daten für diesen Zeitraum' : 'Für dieses Item gibt es keinen Markt';
+  if (I.k.bz){
+    ch.labels = {hi: 'Instabuy', lo: 'Instasell'};
+    ch.setIndicators({hi: true, lo: true, spread: true, volume: true});
+    ch.setData({t: pts.map(p => p.t), hi: pts.map(p => p.buy), lo: pts.map(p => p.sell), vb: pts.map(p => p.sv ?? null), vs: pts.map(p => p.bv ?? null)});
+    const lr = liveRow(I.id), q = S.products[I.id] && S.products[I.id].quick_status;
+    if (lr && S.lastUpdated && r !== 'all' && q) ch.append({t: S.lastUpdated, hi: q.buyPrice || lr.topSell || null, lo: q.sellPrice || lr.topBuy || null, vb: q.sellVolume, vs: q.buyVolume});
+  } else {
+    ch.labels = {hi: 'Ø Verkaufspreis', lo: 'günstigster Verkauf'};
+    ch.setIndicators({hi: true, lo: true, spread: true, volume: true});
+    ch.setData({t: pts.map(p => p.t), hi: pts.map(p => p.avg), lo: pts.map(p => p.min), vb: pts.map(p => p.vol), vs: pts.map(() => null)});
+  }
+  ch.setOverlays({bands: K.itBands && md ? md.terms.map(x => ({from: x.start, to: x.end, label: x.name, color: bandColor(x.name), alpha: .5})) : [],
+                  marks: K.itMarks && md ? md.news.map(x => ({t: x.date, label: x.title.replace(/^SkyBlock\s*/, '')})) : []});
+  const note = $('#mi-cnote');
+  if (note) note.innerHTML = (I.k.bz ? 'Bernstein: Instabuy (niedrigste Sell-Offer), Grün: Instasell (höchste Buy-Order). Unten: Menge in Sell-Offers und Buy-Orders.'
+    : 'Bernstein: Ø Verkaufspreis, Grün: günstigster Verkauf. Unten: Zahl der Verkäufe.') + ' Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles. Prices provided by SkyCofl.';
+}
+
+/* ---------- Kennzahlen eines Items ---------- */
+function analyze(I){
+  const md = K.md, id = I.id, A = {};
+  const T = md ? K.mdT : null, end = md ? md.days.to : E.dayStart(Date.now());
+  const days = T ? T.length : 366;
+  const d = E.daily((I.h1 || []).map(p => ({t: p.t, v: p.v})), {days, end});
+  A.T = d.t; A.v = I.k.bz ? E.hampel(d.v) : d.v;
+  A.spi = md ? md.index.spi : null;
+  A.L = E.lastIdx(A.v); A.p = A.L >= 0 ? A.v[A.L] : null;
+  for (const k of [1, 7, 30, 90]) A['c' + k] = E.change(A.v, k);
+  A.c365 = E.change(A.v, days - 1);
+  if (A.spi){ A.m30 = E.change(A.spi, 30); A.m365 = E.change(A.spi, days - 1); A.m7 = E.change(A.spi, 7); A.m90 = E.change(A.spi, 90); }
+  A.vol = E.volatility(A.v, 30); A.dd = E.maxDrawdown(A.v); A.risk = E.varES(A.v); A.z = E.zscore(A.v, 30);
+  A.beta = A.spi ? E.beta(A.v, A.spi) : null;
+  const vals = A.v.filter(num); A.pctl = A.p != null && vals.length > 20 ? vals.filter(x => x <= A.p).length / vals.length : null;
+  A.min1y = vals.length ? Math.min(...vals) : null; A.max1y = vals.length ? Math.max(...vals) : null;
+  // Elastizität
+  if (I.k.bz){
+    A.eD = E.elasticity(E.weeklySamples(I.h1 || [], 'bmw', 'buy'));
+    A.eS = E.elasticity(E.weeklySamples(I.h1 || [], 'smw', 'sell'));
+  } else if (I.h1){ A.eD = E.elasticity(E.weeklySamples(I.h1.filter(p => p.v), 'vol', 'v', 'sum')); }
+  // Saisonalität (Ortszeit)
+  const tz = new Date().getTimezoneOffset();
+  A.wd = E.profile(A.T, A.v, 'weekday', 7, tz);
+  const h = I.h14 || []; A.hr = h.length > 48 ? E.profile(h.map(p => p.t), h.map(p => p.v), 'hour', 25, tz) : null;
+  // Politik und Updates
+  if (md){
+    const done = md.terms.filter(t => t.end <= md.built && t.start >= A.T[0] + 6 * DAY);   // wie in der Pipeline
+    const mine = E.termReturns(A.T, A.v, done), mkt = new Map(E.termReturns(A.T, A.spi, done).map(x => [x.start, x.ret]));
+    A.my = E.groupBy(mine.map(x => ({name: x.name, abn: mkt.has(x.start) ? x.ret - mkt.get(x.start) : null})), 'name', 'abn');
+    A.ev = md.news.map(nw => { const a = E.eventReturns(A.T, A.v, nw.date, [1, 7]), b = E.eventReturns(A.T, A.spi, nw.date, [7]); return {nw, d1: a.d1, d7: a.d7, abn: a.d7 != null && b.d7 != null ? a.d7 - b.d7 : null}; });
+  }
+  // Lebenszyklus
+  const first = I.hAll && I.hAll.length ? I.hAll[0].t : (I.h1 && I.h1.length && I.h1[0].t > Date.now() - 300 * DAY ? I.h1[0].t : null);
+  const volOf = p => I.k.bz ? p.bmw + p.smw : p.vol;
+  const recent = (I.h1 || []).filter(p => p.t > Date.now() - 90 * DAY), prev = (I.h1 || []).filter(p => p.t <= Date.now() - 90 * DAY && p.t > Date.now() - 180 * DAY);
+  A.life = E.lifecycle(first ? (Date.now() - first) / DAY : null, recent.length > 20 ? E.mean(recent.map(volOf)) : null, prev.length > 20 ? E.mean(prev.map(volOf)) : null);
+  return A;
+}
+
+function drawItem(liveOnly){
+  const I = K.it; if (!I || !I.ready) return;
+  const head = $('#mi-head'); if (head) head.innerHTML = itemHead(I.id);
+  const body = $('#mi-body'); if (!body) return;
+  if (liveOnly && body.contains(document.activeElement) && document.activeElement.matches('input,select')) return;
+  if (!liveOnly || !I.A) I.A = analyze(I);
+  document.title = nm(I.id) + ' – Analyse – SkyBlock Hub';
+  if (!I.k.bz && !I.k.ah){
+    body.innerHTML = `<p class="muted-note">${I.k.known ? 'Dieses Item kann man weder im Bazaar noch im Auktionshaus handeln (z. B. Soulbound). Es gibt dafür keinen Marktpreis.' : 'Dieses Item kennt weder Hypixel noch SkyCofl. Prüf die ID.'}</p>${chainHTML(I)}`;
+    return;
+  }
+  body.innerHTML = `${I.err.length ? `<div class="banner warnb">Ein Teil der Daten konnte nicht geladen werden (${esc(I.err[0])}). Die übrigen Zahlen stimmen.</div>` : ''}
+    ${glanceHTML(I)}
+    <h2 class="mk-part">Volkswirtschaft</h2>
+    <div class="ana-grid">${[supplyDemandHTML(I), elasticityHTML(I), corridorHTML(I), inflationHTML(I), structureHTML(I), seasonHTML(I), politicsHTML(I), updatesItemHTML(I)].join('')}</div>
+    <h2 class="mk-part">Betriebswirtschaft</h2>
+    <div class="ana-grid">${[makeOrBuyHTML(I), contributionHTML(I), flipHTML(I), riskHTML(I), investHTML(I), valuationHTML(I), lifecycleHTML(I)].join('')}</div>
+    <h2 class="mk-part">Wertschöpfungskette</h2>
+    ${chainHTML(I)}
+    <p class="hint">${mdNote()} ${I.k.bz ? 'Live-Werte aus dem Bazaar, Verläufe von SkyCofl.' : 'Auktionshaus-Daten von SkyCofl.'} Prices provided by SkyCofl.</p>`;
+}
+const card = (title, sbText, inner, wide) => `<section class="${wide ? 'wide' : ''}"><h2>${title}</h2>${inner}${sbText ? `<p class="mk-sb"><b>In SkyBlock:</b> ${sbText}</p>` : ''}</section>`;
+const facts = rows => `<dl class="facts">${rows.filter(Boolean).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+
+function glanceHTML(I){
+  const A = I.A, h = K.hy && K.hy[I.id], o = K.md && K.md.items[I.id];
+  return `<dl class="facts mk-glance">
+    ${[['Marktpreis', A.p ? price(A.p) : '–'], ['7 Tage', PC(A.c7)], ['30 Tage', PC(A.c30)], ['1 Jahr', PC(A.c365)],
+       ['Schwankung pro Tag', A.vol != null ? P(A.vol, false) : '–'], ['Sektor', o ? esc(secLabel(o.s)) : '–'], ['NPC-Verkaufspreis', h && h.npc_sell_price ? price(h.npc_sell_price) : 'keiner'], ['Lebenszyklus', esc(A.life.stage)]]
+      .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
+}
+
+/* --- Angebot und Nachfrage --- */
+function supplyDemandHTML(I){
+  if (I.k.bz){
+    const p = S.products[I.id]; if (!p) return card('Angebot und Nachfrage', '', '<p class="loading">Live-Daten laden …</p>');
+    const b = E.book(p), q = p.quick_status || {};
+    return card('Angebot und Nachfrage', 'Jede Buy-Order ist ein Spieler, der zu diesem Preis kaufen will (Nachfrage). Jede Sell-Offer ist ein Angebot. Wo sich die Kurven fast treffen, liegt der Marktpreis. Hypixel zeigt die besten 30 Preisstufen je Seite.',
+      curveSVG(b) + facts([
+        ['Gleichgewichtsbereich', `${price(b.bid)} bis ${price(b.ask)}`], ['Spread', b.spreadPct != null ? P(b.spreadPct, false) : '–'],
+        ['Nachfrage (Buy-Orders)', `${fmt(q.sellVolume)} Stück`], ['Angebot (Sell-Offers)', `${fmt(q.buyVolume)} Stück`],
+        ['Tiefe ±2 % Nachfrage', fmt(b.depth2.demand) + ' Stück'], ['Tiefe ±2 % Angebot', fmt(b.depth2.supply) + ' Stück'],
+        ['Instabuys pro Woche', fmt(q.buyMovingWeek)], ['Instasells pro Woche', fmt(q.sellMovingWeek)],
+        ['Überhang (sichtbar)', b.imbalance == null ? '–' : (b.imbalance > 0 ? 'Nachfrage ' : 'Angebot ') + P(Math.abs(b.imbalance), false)],
+      ]));
+  }
+  const ah = I.ah || {}, s = ah.sold, bins = (ah.bins || []).slice().sort((a, b) => a.startingBid - b.startingBid);
+  return card('Angebot und Nachfrage', 'Das Angebot sind die Sofortkauf-Auktionen (BIN), die Nachfrage zeigt sich in den Verkäufen. Je weiter die billigsten Angebote auseinanderliegen, desto dünner ist der Markt.',
+    (bins.length ? `<table class="mk-mini"><thead><tr><th class="l nosort">Günstigste Angebote</th><th class="nosort">Preis</th><th class="nosort">Abstand</th></tr></thead><tbody>${bins.map((x, i) => `<tr class="static"><td class="l">${esc(String(x.itemName || '').replace(/§./g, ''))}</td><td>${price(x.startingBid / (x.count || 1))}</td><td class="mut">${i ? P(x.startingBid / bins[0].startingBid - 1) : ''}</td></tr>`).join('')}</tbody></table>` : '<p class="note">Gerade keine Sofortkauf-Angebote.</p>')
+    + facts(s ? [['Verkäufe erfasst', `${NF0.format(s.n)} in ${NF1.format(s.span)} Tagen`], ['Verkäufe pro Tag', NF1.format(s.perDay)], ['Preis 10 % / 50 % / 90 %', `${fmt(s.q10)} / ${fmt(s.q50)} / ${fmt(s.q90)}`], ['Median ohne Enchants/Reforge', s.cleanN ? `${price(s.cleanMed)} (${NF0.format(s.cleanN)} Verkäufe)` : '–'], ['Preisstreuung (Variationskoeffizient)', NF2.format(s.cv)]] : [['Verkäufe', 'keine Daten']]));
+}
+function curveSVG(b){
+  const W = 520, H = 220, L = 54, R = 10, T = 10, B = 28;
+  const dem = b.demand, sup = b.supply; if (!dem.length && !sup.length) return '<p class="note">Orderbuch leer.</p>';
+  const mid = b.mid, keep = l => l.p >= mid * .7 && l.p <= mid * 1.3;
+  const d = dem.filter(keep), s = sup.filter(keep);
+  const qmax = Math.max(1, ...d.map(l => l.q), ...s.map(l => l.q)), ps = [...d, ...s].map(l => l.p);
+  let pmin = Math.min(...ps), pmax = Math.max(...ps); if (pmin === pmax){ pmin *= .99; pmax *= 1.01; }
+  const X = q => L + q / qmax * (W - L - R), Y = p => T + (1 - (p - pmin) / (pmax - pmin)) * (H - T - B);
+  const step = (arr) => { if (!arr.length) return ''; let dd = `M${X(0)},${Y(arr[0].p)}`, prev = 0; for (const l of arr){ dd += ` H${X(l.q)}`; const nx = arr[arr.indexOf(l) + 1]; if (nx) dd += ` V${Y(nx.p)}`; prev = l.q; } return dd; };
+  const ticks = [pmin, (pmin + pmax) / 2, pmax];
+  return `<svg class="mk-curve" viewBox="0 0 ${W} ${H}" role="img" aria-label="Nachfrage- und Angebotskurve">
+    ${ticks.map(p => `<line x1="${L}" x2="${W - R}" y1="${Y(p)}" y2="${Y(p)}" class="g"/><text x="${L - 6}" y="${Y(p) + 4}" text-anchor="end">${esc(fmt(p))}</text>`).join('')}
+    <text x="${L}" y="${H - 8}">0</text><text x="${W - R}" y="${H - 8}" text-anchor="end">${esc(fmt(qmax))} Stück</text>
+    <path d="${step(d)}" class="dem"/><path d="${step(s)}" class="sup"/>
+    <text x="${W - R}" y="${Y(d.length ? d[d.length - 1].p : pmin) - 6}" text-anchor="end" class="dl">Nachfrage</text>
+    <text x="${W - R}" y="${Y(s.length ? s[s.length - 1].p : pmax) + 14}" text-anchor="end" class="sl">Angebot</text></svg>`;
+}
+
+/* --- Elastizität --- */
+function elastText(e, what){
+  if (!e) return `<p class="note">Zu wenige Wochen mit Daten für eine Schätzung der ${what}.</p>`;
+  const a = Math.abs(e.b), word = !e.sig ? 'kein sicher messbarer Zusammenhang' : a > 1 ? 'elastisch' : 'unelastisch';
+  return facts([[what, `${NF2.format(e.b)} <small>(${NF2.format(e.lo)} bis ${NF2.format(e.hi)})</small>`], ['Einordnung', word], ['Erklärte Streuung (R²)', NF2.format(e.r2)], ['Wochen', NF0.format(e.n)]]);
+}
+function elasticityHTML(I){
+  const A = I.A;
+  return card('Preiselastizität', I.k.bz
+    ? 'Nachfrage: Wie viele Instabuys gibt es weniger, wenn der Instabuy-Preis um 1 % steigt? Angebot: Wie viel mehr wird per Instasell verkauft, wenn der Preis um 1 % steigt? Die Schätzung zeigt einen Zusammenhang, keine Ursache: Auch Updates und Mayors verschieben beide Größen.'
+    : 'Wie stark ändert sich die Zahl der Verkäufe pro Woche, wenn der günstigste Preis um 1 % steigt?',
+    elastText(A.eD, 'Nachfrageelastizität') + (I.k.bz ? elastText(A.eS, 'Angebotselastizität') : '')
+    + `<p class="note">Werte in Klammern: 95-%-Konfidenzintervall. Liegt die 0 darin, lässt sich kein Zusammenhang belegen.</p>`);
+}
+
+/* --- Preiskorridor --- */
+function craftResult(I, mode){
+  const rec = recipesMap(); if (!rec.has(I.id)) return null;
+  const pf = id => { const r = liveRow(id); if (!r || !r.topBuy || !r.topSell) return null; return mode === 'insta' ? r.topSell : r.buyAt; };
+  const res = E.makeOrBuy(I.id, id => id === I.id ? null : pf(id), rec, 4);
+  return res.craft != null ? res : null;
+}
+let RMAP = null, RMAPn = -1;
+function recipesMap(){
+  if (RMAP && RMAPn === RECIPES.length) return RMAP;
+  RMAP = new Map(); for (const [o, c, ins] of RECIPES){ if (!RMAP.has(o)) RMAP.set(o, []); RMAP.get(o).push([c, ins]); }
+  RMAPn = RECIPES.length; return RMAP;
+}
+function marketPrice(I){ const r = liveRow(I.id); if (I.k.bz && r && r.topBuy && r.topSell) return {buy: r.topSell, sell: r.topBuy}; if (I.ah && I.ah.cur && I.ah.cur.buy) return {buy: I.ah.cur.buy, sell: I.ah.sold ? I.ah.sold.q50 : null}; return null; }
+function corridorHTML(I){
+  const h = K.hy && K.hy[I.id], npc = h && h.npc_sell_price, c = craftResult(I, 'order'), mp = marketPrice(I);
+  const rows = [['NPC-Verkaufspreis (Untergrenze)', npc ? price(npc) : 'keiner'], ['Herstellkosten per Buy-Order (Obergrenze)', c ? price(c.craft) : 'kein Bazaar-Rezept'], ['Marktpreis jetzt', mp ? `${price(mp.sell)} bis ${price(mp.buy)}` : '–']];
+  let verdict = '';
+  if (mp && npc && mp.buy && mp.buy < npc) verdict = `<p class="mk-alert">Der Kaufpreis liegt unter dem NPC-Preis: kaufen und an den NPC verkaufen bringt ${price(npc - mp.buy)} pro Stück. Solche Lücken schließen sich meist schnell.</p>`;
+  else if (mp && c && mp.sell && mp.sell * (1 - BZ_TAX()) > c.craft) verdict = `<p class="mk-alert">Herstellen ist billiger als der Preis, den Käufer gerade zahlen: ${price(mp.sell * (1 - BZ_TAX()) - c.craft)} pro Stück nach Steuer. Das zieht neues Angebot an.</p>`;
+  else if (mp && (npc || c)) verdict = `<p class="note">Der Preis liegt im Korridor${npc ? `, ${P(mp.sell / npc - 1, false)} über der Untergrenze` : ''}${c ? `, ${mp.buy <= c.craft ? P(1 - mp.buy / c.craft, false) + ' unter den Herstellkosten' : P(mp.buy / c.craft - 1, false) + ' über den Herstellkosten'}` : ''}.</p>`;
+  return card('Preisuntergrenze und Obergrenze', 'Unter den NPC-Preis fällt ein Item nicht lange, weil dann jeder an den NPC verkauft. Über die Herstellkosten steigt es nicht lange, weil dann mehr Spieler craften. Dazwischen bewegt sich der Markt.', facts(rows) + verdict);
+}
+
+/* --- Inflation --- */
+function inflationHTML(I){
+  const A = I.A; if (!A.spi) return card('Inflation und realer Preis', '', '<p class="loading">Index lädt …</p>');
+  const real = (c, m) => c == null || m == null ? null : (1 + c) / (1 + m) - 1;
+  return card('Inflation und realer Preis', 'Steigt ein Item um 5 %, während alles um 7 % teurer wird, ist es real billiger geworden. Beta zeigt, wie stark das Item mit dem Gesamtmarkt mitgeht: 1 heißt im Gleichschritt, 0 heißt unabhängig.',
+    `<table class="mk-mini"><thead><tr><th class="l nosort"></th><th class="nosort">Item</th><th class="nosort">Preisindex</th><th class="nosort">real</th></tr></thead><tbody>
+      ${[['30 Tage', A.c30, A.m30], ['90 Tage', A.c90, A.m90], ['1 Jahr', A.c365, A.m365]].map(([l, c, m]) => `<tr class="static"><td class="l">${l}</td><td>${PC(c)}</td><td>${PC(m)}</td><td>${PC(real(c, m))}</td></tr>`).join('')}</tbody></table>`
+    + facts([['Beta zum Markt', A.beta ? NF2.format(A.beta.b) + ` <small>(${NF2.format(A.beta.lo)} bis ${NF2.format(A.beta.hi)})</small>` : '–'], ['Korrelation', A.beta ? NF2.format(A.beta.r) : '–']]));
+}
+
+/* --- Marktstruktur --- */
+function hhiWord(h){ return h == null ? '–' : h < .15 ? 'viel Wettbewerb' : h < .25 ? 'mäßig konzentriert' : 'stark konzentriert'; }
+function structureHTML(I){
+  if (I.k.bz){
+    const p = S.products[I.id]; if (!p) return card('Marktstruktur und Wettbewerb', '', '<p class="loading">Live-Daten laden …</p>');
+    const b = E.book(p), q = p.quick_status || {};
+    return card('Marktstruktur und Wettbewerb', 'Viele kleine Orders auf vielen Preisstufen heißen: niemand bestimmt den Preis. Steht ein Großteil der Menge in einer einzigen Stufe, kann ein einzelner Spieler den Preis halten oder drücken.',
+      facts([['Buy-Orders gesamt', NF0.format(q.sellOrders || 0)], ['Sell-Offers gesamt', NF0.format(q.buyOrders || 0)], ['Ø Größe Buy-Order (sichtbar)', b.d.avgOrder ? fmt(b.d.avgOrder) + ' Stück' : '–'], ['Ø Größe Sell-Offer (sichtbar)', b.s.avgOrder ? fmt(b.s.avgOrder) + ' Stück' : '–'],
+        ['HHI Nachfrage', b.d.hhi != null ? `${NF2.format(b.d.hhi)} <small>${hhiWord(b.d.hhi)}</small>` : '–'], ['HHI Angebot', b.s.hhi != null ? `${NF2.format(b.s.hhi)} <small>${hhiWord(b.s.hhi)}</small>` : '–'],
+        ['Größte Stufe Nachfrage', b.d.topShare != null ? P(b.d.topShare, false) + ' der Menge' : '–'], ['Größte Stufe Angebot', b.s.topShare != null ? P(b.s.topShare, false) + ' der Menge' : '–']]));
+  }
+  const s = I.ah && I.ah.sold;
+  return card('Marktstruktur und Wettbewerb', 'Kommen die Verkäufe von vielen verschiedenen Spielern, herrscht Wettbewerb. Verkauft fast nur einer, bestimmt er den Preis.',
+    s ? facts([['Verschiedene Verkäufer', NF0.format(s.sellers)], ['Anteil des größten Verkäufers', P(s.top, false)], ['HHI der Verkäufer', `${NF2.format(s.hhi)} <small>${hhiWord(s.hhi)}</small>`]]) : '<p class="note">Keine Verkäufe erfasst.</p>');
+}
+
+/* --- Saisonalität --- */
+function barsSVG(prof, keys, labels){
+  const vals = keys.map(k => prof && prof[k] ? prof[k].dev : null), mx = Math.max(.001, ...vals.filter(num).map(Math.abs));
+  const W = 520, H = 120, L = 6, bw = (W - L * 2) / keys.length, mid = 58;
+  return `<svg class="mk-bars" viewBox="0 0 ${W} ${H}" role="img" aria-label="Abweichung vom Durchschnitt">
+    <line x1="0" x2="${W}" y1="${mid}" y2="${mid}" class="g"/>
+    ${vals.map((v, i) => { if (v == null) return ''; const h = Math.abs(v) / mx * 44, x = L + i * bw + bw * .15; return `<rect x="${x}" y="${v >= 0 ? mid - h : mid}" width="${bw * .7}" height="${Math.max(h, .5)}" class="${v >= 0 ? 'up' : 'dn'}"><title>${labels[i]}: ${P(v)}</title></rect>`; }).join('')}
+    ${labels.map((l, i) => i % Math.ceil(keys.length / 12) ? '' : `<text x="${L + i * bw + bw / 2}" y="${H - 4}" text-anchor="middle">${l}</text>`).join('')}</svg>`;
+}
+function seasonHTML(I){
+  const A = I.A, WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'], order = [1, 2, 3, 4, 5, 6, 0];
+  const best = (prof, keys, lab) => { const e = keys.filter(k => prof && prof[k]).map(k => [k, prof[k].dev]); if (e.length < 3) return null; e.sort((a, b) => a[1] - b[1]); return {lo: lab(e[0][0]), loV: e[0][1], hi: lab(e[e.length - 1][0]), hiV: e[e.length - 1][1]}; };
+  const w = best(A.wd, order, k => WD[k]), hrs = Array.from({length: 24}, (_, i) => i), h = A.hr ? best(A.hr, hrs, k => k + ' Uhr') : null;
+  return card('Saisonalität', 'Abweichung vom gleitenden Durchschnitt, nach Wochentag (aus einem Jahr) und Uhrzeit (aus 14 Tagen, deine Ortszeit). Unterschiede unter 1 % sind meist Zufall.',
+    `<h4 class="mk-h4">Wochentag</h4>${barsSVG(A.wd, order, order.map(k => WD[k]))}${w ? `<p class="note">Am günstigsten im Schnitt ${w.lo} (${P(w.loV)}), am teuersten ${w.hi} (${P(w.hiV)}).</p>` : ''}
+     ${A.hr ? `<h4 class="mk-h4">Uhrzeit</h4>${barsSVG(A.hr, hrs, hrs.map(String))}${h ? `<p class="note">Am günstigsten um ${h.lo} (${P(h.loV)}), am teuersten um ${h.hi} (${P(h.hiV)}).</p>` : ''}` : ''}`);
+}
+
+/* --- Politik --- */
+function politicsHTML(I){
+  const A = I.A; if (!A.my) return card('Politik: Wirkung der Mayors', '', '<p class="loading">Mayor-Daten laden …</p>');
+  const cur = curMayor(), cand = K.election && K.election.current && K.election.current.candidates;
+  const lead = cand && cand.length ? cand.slice().sort((a, b) => b.votes - a.votes)[0].name : null;
+  const rows = Object.entries(A.my).sort((a, b) => b[1].mean - a[1].mean);
+  return card('Politik: Wirkung der Mayors', 'Ø-Preis in der Amtszeit gegenüber den 5 Tagen davor, minus dieselbe Veränderung des Gesamtmarkts. Positiv heißt: Unter diesem Mayor wird das Item gefragter oder knapper.',
+    rows.length ? `<table class="mk-mini"><thead><tr><th class="l nosort">Mayor</th><th class="nosort">Amtszeiten</th><th class="nosort">gegenüber Markt</th><th class="nosort">gestiegen</th></tr></thead><tbody>
+      ${rows.map(([n, g]) => `<tr class="static ${cur && cur.name === n ? 'cur' : ''}"><td class="l">${esc(n)}${cur && cur.name === n ? ' <span class="mut">im Amt</span>' : lead === n ? ' <span class="mut">führt in der Wahl</span>' : ''}</td><td>${g.n}</td><td>${PC(g.mean)}</td><td>${Math.round(g.up * 100)} %</td></tr>`).join('')}</tbody></table>
+      <p class="note">Bei 1 bis 2 Amtszeiten ist das Ergebnis Zufall-anfällig.</p>` : '<p class="note">Zu wenig Daten in den Amtszeiten des letzten Jahres.</p>');
+}
+function updatesItemHTML(I){
+  const A = I.A; if (!A.ev) return card('Wirkung der Updates', '', '<p class="loading">Lädt …</p>');
+  return card('Wirkung der Updates', 'Preis am Tag vor dem Update gegenüber 1 und 7 Tagen danach. „Gegenüber Markt“ zieht die Bewegung des Preisindex ab. Große Ausschläge zeigen, welche Updates dieses Item wirklich betroffen haben.',
+    `<table class="mk-mini"><thead><tr><th class="l nosort">Update</th><th class="nosort">1 Tag</th><th class="nosort">7 Tage</th><th class="nosort">gegenüber Markt</th></tr></thead><tbody>
+      ${A.ev.map(e => `<tr class="static"><td class="l"><a class="link" href="${esc(e.nw.link)}" target="_blank" rel="noopener">${esc(e.nw.title.replace(/^SkyBlock\s*/, ''))}</a> <span class="mut">${fdate(e.nw.date)}</span></td><td>${PC(e.d1)}</td><td>${PC(e.d7)}</td><td>${PC(e.abn)}</td></tr>`).join('')}</tbody></table>`);
+}
+
+/* --- BWL --- */
+function treeHTML(n, depth = 0){
+  if (!n.parts || n.how !== 'craft' && depth > 0) return '';
+  return `<ul class="mk-tree">${n.parts.map(p => `<li><span class="q">${fmt(p.q)}×</span> <a class="link" href="#markt/item/${encodeURIComponent(p.node.id)}">${esc(nm(p.node.id))}</a>
+    <span class="mut">${p.node.how === 'craft' ? 'selbst herstellen' : 'kaufen'} à ${price(p.node.cost)} = ${price(p.node.cost * p.q)}</span>${p.node.how === 'craft' && depth < 2 ? treeHTML(p.node, depth + 1) : ''}</li>`).join('')}</ul>`;
+}
+function makeOrBuyHTML(I){
+  const mode = K.mob, c = craftResult(I, mode), mp = marketPrice(I);
+  const seg = `<div class="seg sm mk-segline">${[['order', 'Zutaten per Buy-Order'], ['insta', 'Zutaten per Instabuy']].map(([k, l]) => `<button data-mkmob="${k}" class="${mode === k ? 'on' : ''}">${l}</button>`).join('')}</div>`;
+  if (!c) return card('Kalkulation: kaufen oder selbst herstellen?', 'Nur Rezepte, deren Zutaten (oder deren Zutaten) im Bazaar zu haben sind.', `<p class="note">${recipesMap().has(I.id) ? 'Für mindestens eine Zutat gibt es gerade keinen Bazaar-Preis.' : 'Für dieses Item gibt es kein Crafting-Rezept.'}</p>`);
+  const per = c.craft, buy = mp ? mp.buy : null;
+  const v = buy ? (per < buy ? `<p class="mk-alert">Selbst herstellen spart ${price(buy - per)} pro Stück (${P(1 - per / buy, false)}) gegenüber dem Kauf${I.k.bz ? ' per Instabuy' : ' zum günstigsten Sofortkauf'}.</p>` : `<p class="note">Kaufen ist ${price(per - buy)} pro Stück günstiger als selbst herstellen.</p>`) : '';
+  return card('Kalkulation: kaufen oder selbst herstellen?', 'Für jede Zutat wird geprüft, ob Kaufen oder Selbermachen billiger ist, bis zu 4 Stufen tief. So entstehen die Herstellkosten wie in einer Kostenrechnung.',
+    seg + facts([['Herstellkosten pro Stück', price(per)], ['Rezept ergibt', c.cnt + ' Stück'], ['Kaufpreis jetzt', buy ? price(buy) : '–']]) + v + treeHTML(c));
+}
+function ahFee(p){ return (p < 10e6 ? .01 : p < 100e6 ? .02 : .025) + (p > 1e6 ? .01 : 0); }
+function contributionHTML(I){
+  const c = craftResult(I, 'order'), mp = marketPrice(I);
+  if (!c || !mp) return card('Deckungsbeitrag beim Herstellen', '', '<p class="note">Braucht ein Rezept und einen Marktpreis.</p>');
+  const sellPx = I.k.bz ? Math.round((mp.buy - .1) * 10) / 10 : mp.buy, fee = I.k.bz ? BZ_TAX() : ahFee(mp.buy);
+  const rev = sellPx * (1 - fee), db = rev - c.craft, be = c.craft / (1 - fee);
+  return card('Deckungsbeitrag beim Herstellen', I.k.bz ? `Verkauf per Sell-Offer knapp unter dem Instabuy-Preis, minus ${NF2.format(fee * 100)} % Bazaar-Steuer. Variable Kosten: Zutaten per Buy-Order.` : 'Verkauf knapp zum günstigsten Sofortkauf, minus Auktionsgebühren (1 % bis 10 Mio., 2 % bis 100 Mio., 2,5 % darüber, plus 1 % Abholgebühr über 1 Mio.).',
+    facts([['Erlös pro Stück nach Gebühren', price(rev)], ['Variable Kosten pro Stück', price(c.craft)], ['Deckungsbeitrag pro Stück', `<span class="${cls(db)}">${price(db)}</span>`], ['Deckungsbeitrag in % vom Erlös', P(db / rev)], ['Break-even-Verkaufspreis', price(be)], ['Abstand zum Break-even', P(sellPx / be - 1)]]));
+}
+function flipHTML(I){
+  if (!I.k.bz) return card('Handel als Geschäft', '', '<p class="note">Nur für Bazaar-Items: Im Auktionshaus hängt der Preis am einzelnen Exemplar.</p>');
+  const r = liveRow(I.id); if (!r || !r.buyAt || !r.sellAt) return card('Handel als Geschäft', '', '<p class="loading">Live-Daten laden …</p>');
+  const B = K.calc.budget, share = K.calc.share / 100, tax = BZ_TAX();
+  const Q = Math.min(MAX_ORDER, Math.floor(B / r.buyAt)), profit = r.sellAt * (1 - tax) - r.buyAt;
+  const cyc = cycleModel(Q, r.wSell / 168 * share, r.wBuy / 168 * share);
+  const perDay = cyc.Tused > 0 && isFinite(cyc.Tused) ? 24 / cyc.Tused : 0, cap = Q * r.buyAt;
+  const roiC = cap ? profit * Q / cap : null, roiD = roiC != null ? roiC * perDay : null;
+  return card('Handel als Geschäft', 'Kaufen per Buy-Order, verkaufen per Sell-Offer. Die Durchlaufzeit hängt davon ab, welchen Anteil der gehandelten Menge du bekommst. Dasselbe Modell wie im Bazaar Flipper.',
+    `<div class="calc mk-calc"><label class="field"><span class="lbl">Budget</span><span class="input"><input data-mkcalc="budget" value="${esc(coinText(B))}" inputmode="decimal"><span class="unit">Coins</span></span></label>
+      <label class="field"><span class="lbl">Dein Anteil am Handel</span><span class="input"><input data-mkcalc="share" value="${NF0.format(K.calc.share)}" inputmode="decimal"><span class="unit">%</span></span></label></div>`
+    + facts([['Einkauf per Buy-Order', price(r.buyAt)], ['Verkauf per Sell-Offer', price(r.sellAt)], ['Deckungsbeitrag pro Stück', `<span class="${cls(profit)}">${price(profit)}</span>`], ['Menge pro Durchlauf', NF0.format(Q)],
+      ['Gebundenes Kapital', fmt(cap)], ['Dauer pro Durchlauf', cyc.Tused ? dur(cyc.Tused) : '–'], ['Kapitalumschlag pro Tag', perDay ? NF1.format(perDay) + '×' : '–'], ['Rendite pro Durchlauf', P(roiC)], ['Rendite pro Tag', `<span class="${cls(roiD)}">${P(roiD)}</span>`]]));
+}
+function riskHTML(I){
+  const A = I.A;
+  return card('Risiko', 'Wer Ware auf Lager hat, trägt das Preisrisiko. Value at Risk: so viel ging an einem schlechten Tag (1 von 20) mindestens verloren. Drawdown: der größte Absturz vom Hoch im letzten Jahr.',
+    facts([['Schwankung pro Tag', A.vol != null ? P(A.vol, false) : '–'], ['Schwankung pro Monat', A.vol != null ? P(A.vol * Math.sqrt(30), false) : '–'], ['Value at Risk (95 %, 1 Tag)', A.risk ? P(A.risk.VaR, false) : '–'], ['Expected Shortfall', A.risk ? P(A.risk.ES, false) : '–'],
+      ['Größter Absturz (1 Jahr)', A.dd && A.dd.dd ? P(A.dd.dd, false) + (A.dd.from >= 0 ? ` <small>${fdate(A.T[A.dd.from])} bis ${fdate(A.T[A.dd.to])}</small>` : '') : '–'], ['Beta zum Markt', A.beta ? NF2.format(A.beta.b) : '–']]));
+}
+function investHTML(I){
+  const A = I.A, fee = I.k.bz ? BZ_TAX() : (A.p ? ahFee(A.p) : 0), base = 10e6;
+  const row = (l, c, m) => { const out = c == null ? null : base * (1 + c) * (1 - fee); return `<tr class="static"><td class="l">${l}</td><td>${PC(c)}</td><td>${m == null ? '–' : PC(m)}</td><td>${out == null ? '–' : fmt(out)}</td></tr>`; };
+  return card('Investition: halten statt handeln', `Was wäre aus 10 Mio. Coins geworden, die man damals in dieses Item gesteckt hätte, nach ${I.k.bz ? 'Bazaar-Steuer' : 'Auktionsgebühren'} beim Verkauf? Der Preisindex zeigt die Opportunitätskosten: so viel hätte der Markt im Schnitt gebracht.`,
+    `<table class="mk-mini"><thead><tr><th class="l nosort">vor</th><th class="nosort">Item</th><th class="nosort">Markt</th><th class="nosort">10 Mio. wären heute</th></tr></thead><tbody>
+      ${row('7 Tagen', A.c7, A.m7)}${row('30 Tagen', A.c30, A.m30)}${row('90 Tagen', A.c90, A.m90)}${row('1 Jahr', A.c365, A.m365)}</tbody></table>`);
+}
+function valuationHTML(I){
+  const A = I.A, z = A.z;
+  const word = !z ? '–' : z.z > 2 ? 'auffällig teuer' : z.z > 1 ? 'eher teuer' : z.z < -2 ? 'auffällig günstig' : z.z < -1 ? 'eher günstig' : 'normal';
+  return card('Bewertung: teuer oder günstig?', 'Vergleich mit dem eigenen Verlauf. Ein z-Wert über 2 heißt: so hoch stand der Preis an kaum einem Tag der letzten 30. Das ist eine statistische Einordnung, keine Vorhersage.',
+    facts([['Gegenüber Median 30 Tage', z ? PC(z.vsMedian) : '–'], ['z-Wert (30 Tage)', z ? NF2.format(z.z) : '–'], ['Einordnung', word], ['Spanne im letzten Jahr', A.min1y ? `${fmt(A.min1y)} bis ${fmt(A.max1y)}` : '–'], ['Billiger als heute war es an', A.pctl != null ? P(A.pctl, false) + ' der Tage' : '–']]));
+}
+function lifecycleHTML(I){
+  const A = I.A, l = A.life;
+  return card('Produktlebenszyklus', 'Faustregel aus dem Alter des Items und der Entwicklung der gehandelten Menge (letzte 90 Tage gegenüber den 90 davor).', facts([['Phase', esc(l.stage)], ['Begründung', esc(l.why)]]));
+}
+function chainHTML(I){
+  const rec = recipesMap(), id = I.id, ins = rec.get(id), uses = [];
+  for (const [o, c, ing] of RECIPES) if (ing[id]) uses.push({o, c, q: ing[id], n: Object.keys(ing).length});
+  const seen = new Set(), U = uses.filter(u => !seen.has(u.o) && seen.add(u.o));
+  const mpOf = x => { const r = liveRow(x); return r && r.topBuy ? r.topBuy : null; };
+  U.sort((a, b) => (mpOf(b.o) || 0) - (mpOf(a.o) || 0));
+  return `<div class="two mk-chain">
+    <section><h3 class="mk-h4">Wird hergestellt aus</h3>${ins ? ins.map(([c, ing]) => `<ul class="mk-tree">${Object.entries(ing).map(([k, q]) => `<li><span class="q">${fmt(q)}×</span> <a class="link" href="#markt/item/${encodeURIComponent(k)}">${esc(nm(k))}</a>${mpOf(k) ? ` <span class="mut">${price(mpOf(k))}</span>` : ''}</li>`).join('')}</ul><p class="note">ergibt ${c} Stück</p>`).join('') : '<p class="note">Kein Crafting-Rezept, das Item wird gefarmt, gedroppt oder gekauft.</p>'}</section>
+    <section><h3 class="mk-h4">Wird verwendet für (${NF0.format(U.length)})</h3>${U.length ? `<ul class="mk-tree">${U.slice(0, 25).map(u => `<li><a class="link" href="#markt/item/${encodeURIComponent(u.o)}">${esc(nm(u.o))}</a> <span class="mut">braucht ${fmt(u.q)}×${mpOf(u.o) ? `, Preis ${price(mpOf(u.o))}` : ''}</span></li>`).join('')}</ul>${U.length > 25 ? `<p class="note">und ${U.length - 25} weitere.</p>` : ''}` : '<p class="note">Wird in keinem Crafting-Rezept verwendet.</p>'}</section>
+  </div><p class="mk-sb"><b>In SkyBlock:</b> Je mehr Rezepte ein Item brauchen, desto breiter ist seine Nachfrage (abgeleitete Nachfrage). Steigt ein Endprodukt im Preis, ziehen meist die Zutaten nach.</p>`;
+}
+
+/* =========================================================
+   Eingaben
+   ========================================================= */
+document.addEventListener('click', e => {
+  if (S.tool !== 'markt') return;
+  const t = e.target, q = s => t.closest(s); let el;
+  if ((el = q('[data-mkitem]'))){ e.preventDefault(); nav('markt/item/' + encodeURIComponent(el.dataset.mkitem)); return; }
+  if ((el = q('[data-mksec]'))){ K.list.sec = el.dataset.mksec; K.list.preset = null; K.list.page = 0; nav('markt/items'); return; }
+  if ((el = q('[data-mkpreset]'))){ const k = el.dataset.mkpreset, p = PRESETS[k]; if (K.list.preset === k){ K.list.preset = null; K.list.sort = 'to'; K.list.dir = -1; } else { K.list.preset = k; K.list.sort = p.sort; K.list.dir = p.dir; } K.list.page = 0; if (K.tab !== 'items') nav('markt/items'); else { document.querySelectorAll('[data-mkpreset]').forEach(b => b.classList.toggle('on', b.dataset.mkpreset === K.list.preset)); drawList(); } return; }
+  if ((el = q('[data-mkmkt]'))){ K.list.mkt = el.dataset.mkmkt; K.list.page = 0; document.querySelectorAll('[data-mkmkt]').forEach(b => b.classList.toggle('on', b === el)); drawList(); return; }
+  if ((el = q('[data-mksort]'))){ const k = el.dataset.mksort; if (K.list.sort === k) K.list.dir *= -1; else { K.list.sort = k; K.list.dir = k === 'name' ? 1 : -1; } K.list.page = 0; drawList(); return; }
+  if ((el = q('[data-mkpg]'))){ K.list.page = Math.max(0, K.list.page + +el.dataset.mkpg); drawList(); window.scrollTo({top: 0}); return; }
+  if ((el = q('[data-mkclear]'))){ K.list.q = ''; const s = $('#msearch'); if (s){ s.value = ''; s.parentElement.classList.remove('has'); s.focus(); } drawList(); return; }
+  if ((el = q('[data-mkrange]'))){ K.idx.range = +el.dataset.mkrange; document.querySelectorAll('[data-mkrange]').forEach(b => b.classList.toggle('on', b === el)); feedIndexChart(); return; }
+  if ((el = q('[data-mirange]'))){ K.itRange = el.dataset.mirange; document.querySelectorAll('[data-mirange]').forEach(b => b.classList.toggle('on', b === el)); feedItemChart(); return; }
+  if ((el = q('[data-mkmayor]'))){ K.mayorSel = el.dataset.mkmayor; const v = $('#mk-upd'); if (v){ v.innerHTML = updatesBody(); const m = $('.mk-mf'); if (m) m.scrollIntoView({block: 'nearest'}); } return; }
+  if ((el = q('[data-mkmob]'))){ K.mob = el.dataset.mkmob; drawItem(false); return; }
+  if ((el = q('[data-mkcopy]'))){ const txt = el.dataset.mkcopy; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => { el.textContent = 'Kopiert'; setTimeout(() => el.textContent = 'Name kopieren', 1500); }).catch(() => {}); return; }
+});
+document.addEventListener('change', e => {
+  if (S.tool !== 'markt') return;
+  const t = e.target;
+  if (t.dataset.mkopt){ K.idx[t.dataset.mkopt] = t.checked; feedIndexChart(); }
+  else if (t.dataset.miopt){ K[t.dataset.miopt === 'bands' ? 'itBands' : 'itMarks'] = t.checked; feedItemChart(); }
+  else if (t.hasAttribute('data-mkcmp')){ K.idx.cmp = t.value; feedIndexChart(); }
+  else if (t.hasAttribute('data-mksecsel')){ K.list.sec = t.value; K.list.page = 0; drawList(); }
+  else if (t.dataset.mkcalc){
+    const v = parseCoins(t.value.replace('%', ''));
+    const ok = isFinite(v) && v > 0 && (t.dataset.mkcalc !== 'share' || v <= 100);
+    if (ok){ K.calc[t.dataset.mkcalc] = v; try{ localStorage.setItem('mk:calc', JSON.stringify(K.calc)); }catch{} drawItem(false); }
+    else { t.parentElement.classList.add('bad'); setTimeout(() => t.parentElement.classList.remove('bad'), 1200); }
+  }
+});
+document.addEventListener('input', e => {
+  if (S.tool !== 'markt' || e.target.id !== 'msearch') return;
+  K.list.q = e.target.value; K.list.page = 0; e.target.parentElement.classList.toggle('has', !!e.target.value); drawList();
+});
+document.addEventListener('keydown', e => {
+  if (S.tool !== 'markt') return;
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.mkcalc){ e.target.blur(); return; }
+  if (e.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)){ const s = $('#msearch'); if (s){ e.preventDefault(); s.focus(); } }
+});
+
+window.Markt = {render, mount, update, leave, pageTitle, _K: K, _analyze: analyze};
+if (S.tool === 'markt') renderMain(true);
+})();

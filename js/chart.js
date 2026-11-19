@@ -29,7 +29,8 @@ function fdur(ms){
   return NF1.format(h / 24) + ' Tage';
 }
 const MIN = 60e3, HR = 3600e3, DAY = 86400e3;
-const TIME_STEPS = [MIN, 5*MIN, 15*MIN, 30*MIN, HR, 2*HR, 3*HR, 6*HR, 12*HR, DAY, 2*DAY, 7*DAY];
+const TIME_STEPS = [MIN, 5*MIN, 15*MIN, 30*MIN, HR, 2*HR, 3*HR, 6*HR, 12*HR, DAY, 2*DAY, 7*DAY, 14*DAY];
+const MONTH_STEPS = [1, 2, 3, 6, 12, 24];
 const FIB = [0, .236, .382, .5, .618, .786, 1];
 const TWO_POINT = ['trend', 'rect', 'fib', 'measure'];
 
@@ -69,6 +70,7 @@ class PriceChart {
     this.view = [Date.now() - HR, Date.now()]; this.follow = true; this.yr = [0, 1]; this.vis = [0, -1];
     this.drawings = []; this.history = []; this.tool = 'none'; this.pending = null; this.measure = null;
     this.mouse = null; this.pan = null; this.onChange = null; this.onHover = null; this.empty = 'Keine Daten';
+    this.bands = []; this.marks = []; this.labels = {hi: 'Instabuy', lo: 'Instasell'}; this.fmt = fp;
     this.cv.addEventListener('pointerdown', e => this._down(e));
     this.cv.addEventListener('pointermove', e => this._move(e));
     this.cv.addEventListener('pointerup', e => this._up(e));
@@ -103,6 +105,8 @@ class PriceChart {
     this.follow = true;
     if (!silent) this.draw();
   }
+  // Hintergrund-Zeiträume (z. B. Mayor-Amtszeiten) und senkrechte Marken (z. B. Updates)
+  setOverlays({bands, marks} = {}){ if (bands) this.bands = bands; if (marks) this.marks = marks; this.draw(); }
   setIndicators(o){ Object.assign(this.ind, o); this._calc(); this.draw(); }
   _calc(){
     const {hi, lo} = this.data;
@@ -176,19 +180,49 @@ class PriceChart {
       c.fillText(fp(p), g.L + g.pw + 8, y);
     }
     // Zeitachse
-    const span = v1 - v0, ts = TIME_STEPS.find(s => span / s <= 7) || 7 * DAY;
+    const span = v1 - v0, ts = TIME_STEPS.find(s => span / s <= 7);
     const tzOff = new Date().getTimezoneOffset() * 60e3;
     c.textAlign = 'center';
-    for (let t = Math.ceil((v0 - tzOff) / ts) * ts + tzOff; t <= v1; t += ts){
-      const x = Math.round(this.X(t)) + .5, dt = new Date(t);
+    const tick = (t, lab) => {
+      const x = Math.round(this.X(t)) + .5;
       c.strokeStyle = col.line; c.beginPath(); c.moveTo(x, g.T); c.lineTo(x, g.volB); c.stroke();
-      const lab = ts >= DAY ? dt.toLocaleDateString('de-AT', {day: '2-digit', month: '2-digit'})
-        : (dt.getHours() === 0 && dt.getMinutes() === 0 ? dt.toLocaleDateString('de-AT', {day: '2-digit', month: '2-digit'}) : dt.toLocaleTimeString('de-AT', {hour: '2-digit', minute: '2-digit'}));
       c.fillStyle = col.muted; c.fillText(lab, x, g.H - g.B / 2 + 2);
+    };
+    if (ts){
+      for (let t = Math.ceil((v0 - tzOff) / ts) * ts + tzOff; t <= v1; t += ts){
+        const dt = new Date(t);
+        tick(t, ts >= DAY ? dt.toLocaleDateString('de-AT', {day: '2-digit', month: '2-digit'})
+          : (dt.getHours() === 0 && dt.getMinutes() === 0 ? dt.toLocaleDateString('de-AT', {day: '2-digit', month: '2-digit'}) : dt.toLocaleTimeString('de-AT', {hour: '2-digit', minute: '2-digit'})));
+      }
+    } else {   // lange Zeiträume: Monatsanfänge
+      const ms = MONTH_STEPS.find(m => span / (m * 30.44 * DAY) <= 7) || 48;
+      const d0 = new Date(v0); let y = d0.getFullYear(), m = Math.ceil((d0.getMonth() + (d0.getDate() > 1 ? 1 : 0)) / ms) * ms;
+      for (let k = 0; k < 200; k++, m += ms){
+        const t = new Date(y, m, 1).getTime(); if (t > v1) break; if (t < v0) continue;
+        const dt = new Date(t);
+        tick(t, dt.getMonth() === 0 || ms >= 12 ? String(dt.getFullYear()) : dt.toLocaleDateString('de-AT', {month: 'short', year: '2-digit'}));
+      }
     }
     c.strokeStyle = col.line2; c.beginPath(); c.moveTo(g.L, g.mainB + .5); c.lineTo(g.L + g.pw, g.mainB + .5); c.stroke();
 
     c.save(); c.beginPath(); c.rect(g.L, 0, g.pw, g.H); c.clip();
+    // Hintergrund-Zeiträume
+    let lastLabX = -1e9;
+    for (const b of this.bands){
+      if (b.to < v0 || b.from > v1) continue;
+      const xa = this.X(b.from), xb = this.X(b.to);
+      c.fillStyle = b.color ? (b.color.startsWith('var(') ? css(b.color.slice(4, -1)) || col.line : b.color) : col.line; c.globalAlpha = b.alpha ?? .35; c.fillRect(xa, g.T, xb - xa, g.volB - g.T); c.globalAlpha = 1;
+      if (b.label && xb - xa > 26 && xa > lastLabX){ c.fillStyle = col.muted; c.textAlign = 'left'; c.font = '10.5px ' + (css('--font') || 'sans-serif'); c.fillText(b.label, Math.max(xa, g.L) + 3, g.T + 7); lastLabX = Math.max(xa, g.L) + c.measureText(b.label).width + 8; }
+    }
+    // senkrechte Marken
+    c.font = '10.5px ' + (css('--font') || 'sans-serif');
+    for (const m of this.marks){
+      if (m.t < v0 || m.t > v1) continue;
+      const x = Math.round(this.X(m.t)) + .5;
+      c.strokeStyle = col.draw; c.globalAlpha = .8; c.setLineDash([2, 3]); c.beginPath(); c.moveTo(x, g.T); c.lineTo(x, g.volB); c.stroke(); c.setLineDash([]); c.globalAlpha = 1;
+      if (m.label){ c.save(); c.translate(x + 4, g.T + 22); c.rotate(Math.PI / 2); c.fillStyle = col.draw; c.textAlign = 'left'; c.fillText(m.label, 0, 0); c.restore(); }
+    }
+    c.font = '11.5px ' + (css('--font') || 'sans-serif');
     // Spread-Fläche
     if (this.ind.spread && this.ind.hi && this.ind.lo){
       c.fillStyle = col.emeraldSoft; c.globalAlpha = .6;
@@ -277,8 +311,8 @@ class PriceChart {
   _tooltip(idx, x){
     const d = this.data;
     this.tip.innerHTML = `${new Date(d.t[idx]).toLocaleString('de-AT', {weekday: 'short', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'})}<br>`
-      + `<span class="a">Instabuy ${fp(d.hi[idx])}</span><br><span class="e">Instasell ${fp(d.lo[idx])}</span>`
-      + (d.hi[idx] != null && d.lo[idx] != null ? `<br><span class="m">Spread ${fp(d.hi[idx] - d.lo[idx])}</span>` : '');
+      + (this.ind.hi ? `<span class="a">${this.labels.hi} ${this.fmt(d.hi[idx])}</span><br>` : '') + (this.ind.lo ? `<span class="e">${this.labels.lo} ${this.fmt(d.lo[idx])}</span>` : '')
+      + (this.ind.hi && this.ind.lo && d.hi[idx] != null && d.lo[idx] != null ? `<br><span class="m">Spread ${fp(d.hi[idx] - d.lo[idx])}</span>` : '');
     this.tip.style.display = 'block';
     const w = this.tip.offsetWidth; this.tip.style.left = (x + 14 + w > this.g.L + this.g.pw ? x - w - 14 : x + 14) + 'px'; this.tip.style.top = (this.g.T + 6) + 'px';
   }

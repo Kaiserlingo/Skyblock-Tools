@@ -13,8 +13,21 @@ const BAZAAR_TABS = [
   {id:'watch',    label:'Watchlist'},
   {id:'settings', label:'Einstellungen'},
 ];
+const MARKT_TABS = [
+  {id:'start',   label:'Übersicht'},
+  {id:'items',   label:'Alle Items'},
+  {id:'updates', label:'Updates & Mayors'},
+  {id:'method',  label:'So wird gerechnet'},
+];
+// Werkzeuge mit eigener Oberfläche (render/mount/update/leave) liegen in eigenen Dateien, z. B. js/markt.js
+const lazy = name => (fn, fallback) => (...a) => window[name] && window[name][fn] ? window[name][fn](...a) : fallback;
+const M = lazy('Markt');
 const TOOLS = [
-  {id:'bazaar', title:'Bazaar Flipper',
+  {id:'markt', title:'Markt-Analyse',
+   desc:'Jedes SkyBlock-Item volks- und betriebswirtschaftlich durchleuchtet: Preis, Angebot und Nachfrage, Elastizität, Kosten, Risiko. Dazu, wie Updates und Mayors den Markt bewegen.',
+   tabs: MARKT_TABS, defaultTab:'start',
+   render: M('render', '<p class="loading">Wird geladen …</p>'), mount: M('mount'), update: M('update'), leave: M('leave'), pageTitle: M('pageTitle', 'Markt-Analyse')},
+  {id:'bazaar', title:'Bazaar Flipper', paused: true,
    desc:'Live-Flips mit Buy-Orders, Craft-Flips nur über den Bazaar, NPC-Flips, Marktübersicht und Preis-Alarme.',
    tabs: BAZAAR_TABS, defaultTab:'overview'},
 ];
@@ -576,6 +589,7 @@ function route(){
   if (takeSharedSettings() && S.rows.length) ingest(false);
   const [tool, tab, ...rest] = location.hash.replace('#', '').split('/');
   const prevTab = S.tab;
+  if (S.tool && TOOL[S.tool] && TOOL[S.tool].leave) TOOL[S.tool].leave();
   if (TOOL[tool]){
     S.tool = tool;
     if (tab === 'item' && rest.length){ S.tab = 'item'; S.itemId = decodeURIComponent(rest.join('/')); }
@@ -598,7 +612,7 @@ function renderTop(){
       <div class="spacer"></div>
       ${statusEl()}
       <button class="btn ghost themebtn" data-act="theme">${themeBtnInner()}</button>
-      ${t ? `<button class="btn ghost" id="pauseBtn">${S.paused ? 'Fortsetzen' : 'Pausieren'}</button><button class="btn" id="refreshBtn">Aktualisieren</button>` : ''}
+      ${t && t.id === 'bazaar' ? `<button class="btn ghost" id="pauseBtn">${S.paused ? 'Fortsetzen' : 'Pausieren'}</button><button class="btn" id="refreshBtn">Aktualisieren</button>` : ''}
     </div>
     ${t ? '<nav class="tabs" id="tabs"></nav>' : ''}`;
   renderTabs(); tick();
@@ -606,7 +620,7 @@ function renderTop(){
 function renderTabs(){
   const el = $('#tabs'); if (!el) return;
   const t = TOOL[S.tool];
-  const counts = S.rows.length ? {flips: filteredFlips(true).length, crafts: filteredCrafts(true).length, watch: S.watch.length} : {watch: S.watch.length};
+  const counts = S.tool !== 'bazaar' ? {} : S.rows.length ? {flips: filteredFlips(true).length, crafts: filteredCrafts(true).length, watch: S.watch.length} : {watch: S.watch.length};
   el.innerHTML = t.tabs.map(x => `<button class="${S.tab === x.id ? 'on' : ''}" data-tab="${x.id}">${x.label}${counts[x.id] ? `<span class="n">${counts[x.id]}</span>` : ''}</button>`).join('');
 }
 function tick(){
@@ -626,6 +640,14 @@ function renderMain(force){
   const a = document.activeElement;
   if (!force && a && a.closest && a.closest('#view') && a.matches('input:not(#search), select')) return;
   // Analyse-Seite nur aktualisieren, nicht neu aufbauen (Chart und Zeichnungen bleiben)
+  const tl = S.tool && TOOL[S.tool];
+  if (tl && tl.render){
+    if (!force && tl.update){ tl.update(); return; }
+    document.title = tl.pageTitle(S.tab) + ' – SkyBlock Hub';
+    $('#view').innerHTML = tl.render(S.tab);
+    renderTabs(); if (tl.mount) tl.mount(S.tab);
+    return;
+  }
   if (!force && S.tool && S.tab === 'item' && S.achart && S.byId[S.itemId]){ updateAnalysis(); renderTabs(); return; }
   const wasSearch = a && a.id === 'search', pos = wasSearch ? a.selectionStart : 0;
   let html;
@@ -783,17 +805,14 @@ function leadSentence(b){
   return `Gerade bringt ${esc(b.name)} am meisten: rund ${words(b.pph)} Coins pro Stunde${b.kind === 'craft' ? ' als Craft-Flip' : ''}.`;
 }
 function pageHub(){
-  const b = bestNow();
-  const n = S.rows.length ? filteredFlips(true).length + filteredCrafts(true).length : null;
   return `<section class="hub">
-    <p class="intro">Werkzeuge für Hypixel SkyBlock. Die Preise kommen live aus dem Bazaar und werden alle ${S.set.interval} Sekunden neu geladen.</p>
-    <h1 class="lead">${leadSentence(b)}</h1>
-    <h2 class="hub-h">Werkzeuge</h2>
+    <p class="intro">Werkzeuge für Hypixel SkyBlock mit Live-Daten aus dem Spiel.</p>
+    <h1 class="lead">Was willst du dir ansehen?</h1>
     <ul class="toollist">${TOOLS.map(t => `
-      <li><a href="#${t.id}" data-nav="${t.id}">
-        <span class="t">${t.title}</span>
+      <li class="${t.paused ? 'paused' : ''}"><a href="#${t.id}" data-nav="${t.id}">
+        <span class="t">${t.title}${t.paused ? '<span class="tag">pausiert</span>' : ''}</span>
         <span class="d">${t.desc}</span>
-        <span class="m">${t.id === 'bazaar' && n != null ? `${NF0.format(n)} passende Flips` : ''}</span>
+        <span class="m">${t.paused ? 'Funktioniert weiter, wird aber gerade nicht weiterentwickelt.' : ''}</span>
       </a></li>`).join('')}
     </ul>
     <p class="fine">Inoffizielles Fan-Projekt, nicht mit Hypixel oder Mojang verbunden. Deine Eingaben bleiben in deinem Browser.</p>
