@@ -36,7 +36,7 @@ const DEFAULTS = {
   minProfit: 1, minPct: 2, maxPct: 50, maxDev: 8, hideRisky: true,
   craftBuy: 'order', craftSell: 'offer', craftMinProfit: 0, craftMinPct: 3,
   marketLiquidOnly: false,
-  retentionH: 48, pageSize: 50, sound: true, theme: 'system',
+  retentionH: 48, pageSize: 50, sound: true, theme: 'system', minCycle: 5,
 };
 // Strategien: setzen alle Nachfrage-, Margen- und Stabilitätsfilter auf einen Schlag.
 //  Sicher     – Orders füllen sich in Minuten, Preise stabil, dafür kleine Margen
@@ -72,6 +72,7 @@ const SLIDERS = {
   minPct:      {label:'Min. Marge', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
   craftMinPct: {label:'Min. Marge pro Craft', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
   maxPct:      {label:'Max. Marge', steps:[10,20,30,50,75,100,150,200,300,500], f: v => NF0.format(v) + ' %', hint:'Höhere Margen sind oft Manipulation oder kaum gehandelt.'},
+  minCycle:    {label:'Mindestens pro Durchlauf', steps:[1,2,3,5,10,15,30,60], f: v => v + ' min', hint:'Zeit, die du pro Kaufen-und-Verkaufen-Runde mindestens brauchst (Orders setzen, abholen, neu einstellen).'},
   maxDev:      {label:'Max. Ausreißer im Orderbuch', steps:[1,2,3,5,8,10,15,25,50,1000], f: v => v >= 1000 ? 'aus' : NF1.format(v) + ' %', hint:'Wie weit der oberste Preis vom gewichteten Durchschnitt der besten Orders abweichen darf. Fängt einzelne Lock- oder Dump-Orders ab.'},
   interval:    {label:'Aktualisierung alle', steps:[10,15,20,30,45,60,120], f: v => v + ' s', hint:'Hypixel aktualisiert den Bazaar etwa alle 20 Sekunden.'},
 };
@@ -129,6 +130,7 @@ const nf = (d=1, min=0) => new Intl.NumberFormat('de-AT', {maximumFractionDigits
 const NF0 = nf(0), NF1 = nf(1), NF1f = nf(1,1), NF2 = nf(2);
 function fmt(n){
   if (n == null || !isFinite(n)) return '–';
+  n = noNegZero(n, 1);
   const a = Math.abs(n);
   if (a >= 1e9) return NF2.format(n/1e9) + '\u00a0B';
   if (a >= 1e6) return NF2.format(n/1e6) + '\u00a0M';
@@ -136,8 +138,10 @@ function fmt(n){
   if (a >= 100) return NF0.format(n);
   return NF1.format(n);
 }
-function price(n){ return (n == null || !isFinite(n) || n === 0) ? '–' : (Math.abs(n) >= 1e9 ? fmt(n) : NF1f.format(n)); }
-function pct(n, sign=true){ if (n == null || !isFinite(n)) return '–'; return (sign && n > 0 ? '+' : '') + NF1.format(n) + '\u00a0%'; }
+function price(n){ if (n == null || !isFinite(n) || n === 0) return '–'; n = noNegZero(n, 1); return n === 0 ? '0,0' : NF1f.format(n); }
+// Werte, die gerundet 0 ergeben, ohne Minuszeichen anzeigen
+function noNegZero(n, d){ return Math.abs(n) < 0.5 * Math.pow(10, -d) ? 0 : n; }
+function pct(n, sign=true){ if (n == null || !isFinite(n)) return '–'; n = noNegZero(n, 1); return (sign && n > 0 ? '+' : '') + NF1.format(n) + '\u00a0%'; }
 function cls(n){ return n > 0 ? 'pos' : n < 0 ? 'neg' : 'mut'; }
 function ago(ms){ const s = Math.round(ms/1000); if (s < 60) return s + ' s'; const m = Math.round(s/60); if (m < 60) return m + ' min'; return NF1.format(m/60) + ' h'; }
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -269,6 +273,7 @@ async function poll(){
     if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
     if (!j.success) throw new Error(j.cause || 'API meldet Fehler');
+    if (!j.products || typeof j.products !== 'object' || Object.keys(j.products).length < 10) throw new Error('unvollständige Antwort');
     S.lastFetch = Date.now(); S.polls++;
     const fresh = j.lastUpdated !== S.lastUpdated;
     S.lastUpdated = j.lastUpdated;
@@ -315,6 +320,16 @@ function ingest(fresh){
   if (S.craftDetail != null) renderCraftDetail();
 }
 
+/* Ein Modell für „Profit pro Stunde“ – in Tabellen, Übersicht, Analyse und Flip-Rechner gleich:
+   Ein Durchlauf = Q Stück kaufen, dann Q Stück verkaufen.
+   Buy-Orders füllen sich mit deinem Anteil an den Instasells (a / h), Sell-Offers mit deinem Anteil an den Instabuys (b / h).
+   Dauer T = Q/a + Q/b, aber mindestens „Mindestens pro Durchlauf“. Stück pro Stunde = Q / T. */
+function cycleModel(Q, buyRate, sellRate){
+  if (!(Q > 0)) return {T: 0, Tused: 0, perH: 0};
+  const T = (buyRate == null ? 0 : (buyRate > 0 ? Q / buyRate : Infinity)) + (sellRate == null ? 0 : (sellRate > 0 ? Q / sellRate : Infinity));
+  const Tused = Math.max(T, (S.set.minCycle || 0) / 60);
+  return {T, Tused, perH: isFinite(Tused) && Tused > 0 ? Q / Tused : 0};
+}
 function compute(id, p){
   const qs = p.quick_status || {};
   const bo = p.sell_summary && p.sell_summary[0];   // höchste Buy-Order (= Instasell-Preis)
@@ -333,16 +348,18 @@ function compute(id, p){
   const turnH = perHour * mid;
   const balance = Math.max(wBuy, wSell) ? Math.min(wBuy, wSell) / Math.max(wBuy, wSell) * 100 : 0;
   const maxQty = buyAt ? Math.min(MAX_ORDER, Math.floor(S.set.budget / buyAt)) : 0;
-  const qty = Math.floor(Math.min(maxQty, perHour * S.set.share/100));
+  const share = S.set.share / 100;
+  const cyc = cycleModel(maxQty, wSell / 168 * share, wBuy / 168 * share);
+  const qty = cyc.perH;                          // Stück pro Stunde
   const pph = profit > 0 ? profit * qty : 0;
   const spreadPct = topBuy ? (topSell - topBuy) / topBuy * 100 : 0;
   const npc = S.npc[id] || 0;
   const npcInsta = npc && topSell ? npc - topSell : 0;
   const npcOrder = npc && buyAt ? npc - buyAt : 0;
-  const npcQty = npcOrder > 0 ? Math.floor(Math.min(S.set.budget / buyAt, wSell / 168 * S.set.share/100 * 24)) : 0;
+  const npcQty = npcOrder > 0 ? cycleModel(maxQty, wSell / 168 * share, null).perH * 24 : 0;   // Stück pro Tag (NPC kauft sofort)
   return {
     id, name: pretty(id), topBuy, topSell, buyAt, sellAt, profit, marginPct, wBuy, wSell, wVol: wBuy + wSell,
-    perHour, turnH, balance, maxQty, qty, pph, spreadPct,
+    perHour, turnH, balance, maxQty, qty, pph, spreadPct, cycleT: cyc.T,
     buyOrders: qs.buyOrders || 0, sellOrders: qs.sellOrders || 0,
     topBuyOrders: bo ? bo.orders : 0, topSellOrders: so ? so.orders : 0,
     npc, npcInsta, npcOrder, npcQty, npcTotal: npcOrder > 0 ? npcOrder * npcQty : 0,
@@ -403,7 +420,8 @@ function computeCrafts(){
     const o = S.byId[oid];
     if (!o || !o.topBuy || !o.topSell) continue;
     let cost = 0, costInsta = 0, ok = true, allLiquid = liquid(o);
-    let craftsH = (s.craftSell === 'offer' ? o.wBuy : o.wSell) / 168 / cnt, limiting = oid;
+    const outRate = (s.craftSell === 'offer' ? o.wBuy : o.wSell) / 168 / cnt;   // Crafts/h, die der Markt beim Verkauf abnimmt
+    let craftsH = outRate, inRate = Infinity, limiting = oid;
     const parts = [];
     for (const id in ins){
       const r = S.byId[id], q = ins[id];
@@ -412,6 +430,7 @@ function computeCrafts(){
       cost += unit * q; costInsta += r.topSell * q;
       const rate = (s.craftBuy === 'insta' ? r.wBuy : r.wSell) / 168 / q;
       if (rate < craftsH){ craftsH = rate; limiting = id; }
+      inRate = Math.min(inRate, rate);
       if (!liquid(r)) allLiquid = false;
       parts.push({id, q, unit, sub: unit * q});
     }
@@ -422,7 +441,9 @@ function computeCrafts(){
     const marginPct = profit / cost * 100;
     const fastProfit = o.topBuy * cnt * (1 - tax) - costInsta;
     const maxCrafts = Math.floor(s.budget / cost);
-    const qty = Math.floor(Math.min(maxCrafts, craftsH * share));
+    const cyc = cycleModel(maxCrafts, s.craftBuy === 'insta' ? null : inRate * share, s.craftSell === 'insta' ? null : outRate * share);
+    // Instabuy/Instasell sind sofort, aber auch dann nimmt der Markt nicht mehr ab als sein Handel hergibt
+    const qty = Math.min(cyc.perH, craftsH * share);
     const pph = profit > 0 ? profit * qty : 0;
     const risk = [...o.risk];
     for (const p of parts){ const r = S.byId[p.id]; if (r.risk.length) risk.push(r.name + ': ' + r.risk[0]); }
@@ -499,11 +520,20 @@ function parseCoins(str){
   const m = s.match(/^([0-9.,]+)([kmb]?)$/);
   if (!m) return NaN;
   let num = m[1];
-  // "1.000.000" (Tausenderpunkte) vs "2,5" / "2.5" (Dezimal)
-  if (/^\d{1,3}(\.\d{3})+$/.test(num)) num = num.replace(/\./g, '');
-  else if (/^\d{1,3}(,\d{3})+$/.test(num) && !m[2]) num = num.replace(/,/g, '');
+  if (/[.,]{2}|^[.,]|[.,]$/.test(num)) return NaN;                 // "1..2", ",5", "5."
+  const hasDot = num.includes('.'), hasComma = num.includes(',');
+  if (hasDot && hasComma){
+    // beide Trennzeichen: das letzte ist das Dezimalzeichen ("1.941.111,7" oder "1,941,111.7")
+    const dec = num.lastIndexOf('.') > num.lastIndexOf(',') ? '.' : ',', grp = dec === '.' ? ',' : '.';
+    const [intPart, frac] = [num.slice(0, num.lastIndexOf(dec)), num.slice(num.lastIndexOf(dec) + 1)];
+    if (intPart.split(grp).some((g, i) => i > 0 && g.length !== 3) || frac.includes(grp)) return NaN;
+    num = intPart.split(grp).join('') + '.' + frac;
+  }
+  else if (/^\d{1,3}(\.\d{3})+$/.test(num)) num = num.replace(/\./g, '');              // 1.000.000
+  else if (/^\d{1,3}(,\d{3})+$/.test(num) && !m[2]) num = num.replace(/,/g, '');        // 1,000,000
+  else if ((num.match(/[.,]/g) || []).length > 1) return NaN;                          // 1.2.3 ohne Tausender-Muster
   else num = num.replace(',', '.');
-  const v = parseFloat(num);
+  const v = Number(num);
   if (!isFinite(v)) return NaN;
   return v * ({k:1e3, m:1e6, b:1e9}[m[2]] || 1);
 }
@@ -524,7 +554,7 @@ function banner(html){
   const b = $('#banner'); if (b){ b.innerHTML = html; b.style.display = html ? 'block' : 'none'; }
 }
 /* Einstellungen per Link teilen: #bazaar/overview~<kodierte Werte> */
-const SHARE_KEYS = ['budget','share','tax','preset','minVolH','minTurnH','minBalance','minPct','maxPct','maxDev','minProfit','hideRisky','craftBuy','craftSell','craftMinPct','craftMinProfit'];
+const SHARE_KEYS = ['budget','share','tax','minCycle','preset','minVolH','minTurnH','minBalance','minPct','maxPct','maxDev','minProfit','hideRisky','craftBuy','craftSell','craftMinPct','craftMinProfit'];
 function shareLink(){
   const o = {}; for (const k of SHARE_KEYS) o[k] = S.set[k];
   const code = btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -719,7 +749,7 @@ function renderDrawer(){
     secs.push(`<section><h3>Strategie</h3>${presetSeg()}
       ${cur ? `<p class="note">${esc(cur.desc)}</p><ul class="rules">${presetRules(cur).map(x => `<li>${x}</li>`).join('')}</ul>`
             : '<p class="note">Du hast die Filter selbst angepasst. Wähl eine Strategie, um alle Werte zurückzusetzen.</p>'}</section>`);
-    secs.push(`<section><h3>Kapital</h3>${coinCtl('budget', 'Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b')}${sliderCtl('share')}</section>`);
+    secs.push(`<section><h3>Kapital und Zeit</h3>${coinCtl('budget', 'Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b')}${sliderCtl('share')}${sliderCtl('minCycle')}</section>`);
   }
   secs.push(`<section><h3>Nachfrage</h3><p class="note">Damit sich deine Orders schnell füllen, muss auf beiden Seiten genug gehandelt werden.</p>${sliderCtl('minVolH')}${sliderCtl('minTurnH')}${sliderCtl('minBalance')}</section>`);
   if (kind === 'crafts'){
@@ -817,7 +847,7 @@ const PAGES = {
       <td class="sell ${flash(r.id+'s', r.sellAt)}">${price(r.sellAt)}</td>
       <td>${price(r.profit)}<small>${pct(r.marginPct, false)}</small></td>
       <td>${fmt(r.perHour)}</td>
-      <td>${bar(r.pph, max)}<small>bei ${fmt(r.qty)} Stück</small></td></tr>`).join('');
+      <td>${bar(r.pph, max)}<small>${fmt(r.qty)} Stück pro Stunde</small></td></tr>`).join('');
     return toolbar('flips', rows.length, rows.length === 1 ? 'Flip' : 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Kein Flip passt.', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table></div>${html}
       <p class="hint">Setz eine Buy-Order zum grünen Preis. Sobald sie gefüllt ist, stellst du eine Sell-Offer zum Preis daneben ein. Klick auf eine Zeile für Verlauf und Orderbuch.</p>`;
   },
@@ -839,7 +869,7 @@ const PAGES = {
       <td class="sell">${fmt(c.revenue)}</td>
       <td class="${cls(c.profit)}">${fmt(c.profit)}<small>${pct(c.marginPct, false)}, sofort ${fmt(c.fastProfit)}</small></td>
       <td>${fmt(c.craftsH)}<small>Engpass ${esc(c.limitingName)}</small></td>
-      <td>${bar(c.pph, max)}<small>bei ${fmt(c.qty)} Crafts</small></td></tr>`).join('');
+      <td>${bar(c.pph, max)}<small>${fmt(c.qty)} Crafts pro Stunde</small></td></tr>`).join('');
     return toolbar('crafts', rows.length, rows.length === 1 ? 'Craft-Flip' : 'Craft-Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Kein Craft-Flip passt.', 'Probier eine andere Strategie oder ändere den Ablauf im Filter.')}</tbody></table></div>${html}
       <p class="hint">Nur Rezepte, bei denen das Ergebnis und alle Zutaten im Bazaar gehandelt werden, kein Auktionshaus. ${NF0.format(S.crafts.length)} von ${NF0.format(RECIPES.length)} Rezepten gehen komplett über den Bazaar. Das Rezept musst du über die Collection freigeschaltet haben.</p>`;
   },
@@ -922,6 +952,7 @@ const PAGES = {
       ${row('Budget', 'Wie viele Coins du für Flips einsetzen willst.', coinCtl('budget', 'Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b'))}
       ${row('Bazaar-Steuer', 'Standard sind 1,25 %. Mit dem Community-Shop-Upgrade „Bazaar Flipper“ zahlst du weniger.', segCtl('tax', [[1.25,'1,25 %'],[1.125,'1,125 %'],[1,'1 %']]))}
       ${row('Anteil am Handel', 'Wie viel vom stündlichen Handel du realistisch abbekommst. Davon hängen „Profit pro Stunde“ und „Crafts pro Stunde“ ab.', sliderCtl('share'))}
+      ${row('Zeit pro Durchlauf', 'Wie lange du für eine Runde Kaufen und Verkaufen mindestens brauchst. Damit wird „Profit pro Stunde“ überall gleich und realistisch gerechnet.', sliderCtl('minCycle'))}
       ${row('Aktualisierung', 'Hypixel aktualisiert den Bazaar etwa alle 20 Sekunden.', sliderCtl('interval'))}
       ${row('Zeilen pro Seite', '', segCtl('pageSize', [[25,'25'],[50,'50'],[100,'100'],[250,'250']]))}
       ${row('Alarme', notifTxt, `${switchCtl('sound', 'Ton abspielen')}<div class="btnrow"><button class="btn" data-act="notif">Benachrichtigungen erlauben</button><button class="btn ghost" data-act="test">Testalarm</button></div>`)}
@@ -1281,6 +1312,7 @@ function flipCalc(r, buyMode, sellMode){
   const tBuy = buyMode === 'insta' ? {best: 0, real: 0} : {best: instasellH ? qty / instasellH : Infinity, real: instasellH ? qty / (instasellH * share) : Infinity};
   const tSell = sellMode === 'insta' ? {best: 0, real: 0} : {best: instabuyH ? qty / instabuyH : Infinity, real: instabuyH ? qty / (instabuyH * share) : Infinity};
   const tReal = tBuy.real + tSell.real, tBest = tBuy.best + tSell.best;
+  const tUsed = qty > 0 ? Math.max(tReal, (S.set.minCycle || 0) / 60) : 0;
   // --- Hinweise ---
   if (buyMode === 'order' && sellMode === 'offer' && buyPx >= sellPx) warn.push('Dein Kaufpreis liegt nicht unter deinem Verkaufspreis – so gibt es keinen Gewinn.');
   if (buyMode === 'order' && buyPx > r.topSell && r.topSell) warn.push('Deine Buy-Order liegt über dem Instabuy-Preis. Dann ist Instabuy günstiger.');
@@ -1291,7 +1323,7 @@ function flipCalc(r, buyMode, sellMode){
   if (cost > S.set.budget && calcPrefs.mode === 'qty') warn.push(`Der Einkauf (${fmt(cost)}) ist größer als dein Budget (${fmt(S.set.budget)}).`);
   if (r.risk.length) warn.push('Warnhinweis zum Item: ' + r.risk.join(' '));
   return {qty, buyPx, sellPx, cost, gross, taxC, net, profit, margin: cost ? profit / cost * 100 : 0, tBuy, tSell, tReal, tBest,
-          pph: tReal > 0 && isFinite(tReal) ? profit / tReal : null, perDay: tReal > 0 && isFinite(tReal) ? Math.floor(24 / tReal) : null, orders, warn};
+          tUsed, pph: tUsed > 0 && isFinite(tUsed) ? profit / tUsed : null, perDay: tUsed > 0 && isFinite(tUsed) ? Math.floor(24 / tUsed) : null, orders, warn};
 }
 function dur(h){
   if (h === 0) return 'sofort';
@@ -1355,8 +1387,8 @@ function calcResult(r){
   return `${figures([
       ['Gewinn', `<span class="${cls(c.profit)}">${fmt(c.profit)}</span>`],
       ['Marge', `<span class="${cls(c.margin)}">${pct(c.margin, false)}</span>`],
-      ['Dauer pro Durchlauf', dur(c.tReal)],
-      ['Profit pro Stunde', c.pph != null ? fmt(c.pph) : (c.tReal === 0 ? 'sofort' : '–')],
+      ['Dauer pro Durchlauf', dur(c.tReal) + (c.tUsed > c.tReal ? ` <small>(gerechnet: ${dur(c.tUsed)})</small>` : '')],
+      ['Profit pro Stunde', c.pph != null ? fmt(c.pph) : '–'],
     ])}
     <div class="receipt">
       <div><span>Einkauf: ${NF0.format(c.qty)} × ${price(c.buyPx)}${calcPrefs.buy === 'insta' ? ' (Ø über das Orderbuch)' : ''}</span><b>− ${fmt(c.cost)}</b></div>
@@ -1395,10 +1427,10 @@ function calcCompare(r){
     ${rows.map(x => `<tr class="${calcPrefs.buy === x.b && calcPrefs.sell === x.s ? 'cur' : ''}" data-ccombo="${x.b}|${x.s}">
       <td class="l">${MODE_NAMES[x.b]} → ${x.s === 'offer' ? 'Sell-Offer' : 'Instasell'}${best === x ? ' <span class="tag">am schnellsten im Plus</span>' : ''}</td>
       <td>${NF0.format(x.c.qty)}</td><td class="${cls(x.c.profit)}">${fmt(x.c.profit)}</td><td class="${cls(x.c.margin)}">${pct(x.c.margin, false)}</td>
-      <td>${dur(x.c.tReal)}</td><td>${x.c.pph != null ? fmt(x.c.pph) : (x.c.tReal === 0 ? 'sofort' : '–')}</td>
+      <td>${dur(x.c.tReal)}</td><td>${x.c.pph != null ? fmt(x.c.pph) : '–'}</td>
       <td>${calcPrefs.buy === x.b && calcPrefs.sell === x.s ? '<span class="mut">gewählt</span>' : '<button class="link">wählen</button>'}</td></tr>`).join('')}
   </tbody></table></div>
-  <p class="hint">Dauer „realistisch“: Handel der letzten 7 Tage × dein Anteil von ${NF1.format(S.set.share)} %. „Bestenfalls“ heißt, deine Order bleibt die ganze Zeit ganz oben. Instabuy und Instasell sind sofort, kosten aber den Spread.</p>`;
+  <p class="hint">Dauer „realistisch“: Handel der letzten 7 Tage × dein Anteil von ${NF1.format(S.set.share)} %. Profit pro Stunde rechnet mit mindestens ${S.set.minCycle} min pro Durchlauf (änderbar in den Einstellungen). „Bestenfalls“ heißt, deine Order bleibt die ganze Zeit ganz oben. Instabuy und Instasell sind sofort, kosten aber den Spread.</p>`;
 }
 function refreshCalc(full){
   const r = S.byId[S.itemId], box = $('#fcalc'); if (!r || !box) return;
