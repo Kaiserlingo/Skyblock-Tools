@@ -1,0 +1,19 @@
+name: Prüfung Live-Preise
+
+# Rechnet den Lowest BIN jedes Items aus demselben Auktions-Stand zweimal unabhängig aus
+# (tools/ah_lib.mjs und ein eigener Python-NBT-Leser) und vergleicht alle Items.
+on:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: python3 tests/live/fetch_auctions.py auctions.json
+      - run: node tests/live/agg_node.mjs auctions.json node.json
+      - run: python3 tests/live/verify_prices.py auctions.json node.json
