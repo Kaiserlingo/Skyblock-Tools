@@ -512,3 +512,6 @@ a.mk-it{text-decoration:none}
   .mk-calc{grid-template-columns:1fr}
   .mk-part{font-size:19px;margin-top:40px}
 }
+.mk-mini th:not(.l){min-width:0}
+.mk-item .ana-grid section{overflow-x:auto}
+@media (max-width:640px){ .mk-mini th,.mk-mini td{padding:6px 5px;font-size:13px} }
