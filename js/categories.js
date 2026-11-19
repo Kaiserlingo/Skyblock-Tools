@@ -57,7 +57,8 @@ const EXTRA = {
   FISHING: ['NURSE_SHARK_TOOTH', 'BLUE_SHARK_TOOTH', 'TIGER_SHARK_TOOTH', 'GREAT_WHITE_SHARK_TOOTH', 'SHARK_FIN', 'ENCHANTED_SHARK_FIN', 'CHUM', 'EMPTY_CHUM_BUCKET',
     'FULL_CHUM_BUCKET', 'THUNDER_SHARDS', 'TITANOBOA_SHED', 'ALLIGATOR_SKIN', 'AGARIMOO_TONGUE', 'SCUTTLER_SHELL', 'CAN_OF_WORMS', 'MAGMA_LORD_FRAGMENT', 'FLAMES'],
 };
-const PATTERNS = [[/_FOSSIL$/, 'MINING'], [/^GLACITE_/, 'MINING'], [/^DIVAN_/, 'MINING'], [/_WATER_ORB$/, 'FISHING'], [/_BAIT$/, 'FISHING']];
+const PATTERNS = [[/_FOSSIL$/, 'MINING'], [/^GLACITE_/, 'MINING'], [/^DIVAN_/, 'MINING'], [/_WATER_ORB$/, 'FISHING'], [/_BAIT$/, 'FISHING'],
+  [/_DRILL_ENGINE$|_FUEL_TANK$|_UPGRADE_MODULE$/, 'MINING'], [/(^|_)HOE(_|$)/, 'TOOLS'], [/^ABIPHONE_/, 'ODDITIES']];
 
 function make(hyItems, collections, recipes){
   const hy = {}; for (const it of hyItems || []) hy[it.id] = it;

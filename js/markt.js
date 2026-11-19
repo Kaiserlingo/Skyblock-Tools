@@ -99,6 +99,7 @@ function pxChanged(){
 function pxOf(id){ return K.px && K.px.items[id] || null; }
 function pxAge(){ return K.px ? Date.now() - K.px.lastUpdated : null; }
 function pxNote(){
+  if (K.px && pxAge() > 30 * 60e3) return `Auction-House-Preise: Stand ${fdt(K.px.lastUpdated)} (vor ${ago(pxAge())}). Die automatische Aktualisierung hängt gerade, die Preise können veraltet sein.`;
   if (K.px) return `Auction-House-Preise: Stand ${new Date(K.px.lastUpdated).toLocaleTimeString('de-AT', {hour: '2-digit', minute: '2-digit'})} (vor ${ago(pxAge())}), aus allen ${NF0.format(K.px.auctions)} aktiven Auktionen, alle 10 Minuten neu.`;
   return K.pxErr ? 'Die Auction-House-Preise konnten gerade nicht geladen werden.' : 'Auction-House-Preise werden geladen …';
 }
@@ -480,7 +481,7 @@ function itemHead(id){
   else if (k.ah){
     const s = I && I.ah && I.ah.sold;
     px = `<dl class="figures mk-fig"><div><dt>Lowest BIN</dt><dd class="amber">${x && x.b != null ? price(x.b) : '–'}</dd></div><div><dt>Zweitgünstigster BIN</dt><dd>${x && x.l5 && x.l5[1] != null ? price(x.l5[1]) : '–'}</dd></div><div><dt>BIN-Angebote</dt><dd>${x ? NF0.format(x.n || 0) : '–'}</dd></div><div><dt>Verkäufe pro Tag</dt><dd>${s && s.perDay != null ? NF1.format(s.perDay) : '–'}</dd></div></dl>
-      <p class="hint mk-src">${x && x.b == null ? (x.last != null ? `Gerade kein BIN-Angebot. Zuletzt gesehen: ${price(x.last)} am ${fdt(x.seen)}. ` : 'Gerade kein BIN-Angebot. ') : ''}${x && x.a ? `${NF0.format(x.a)} Gebots-Auktionen, höchstes Gebot ${price(x.hb)}. ` : ''}${pxNote()}</p>
+      <p class="hint mk-src">${x && x.b == null ? (x.last != null ? `Gerade kein BIN-Angebot. Zuletzt gesehen: ${price(x.last)} am ${fdt(x.seen)}. ` : 'Gerade kein BIN-Angebot. ') : ''}${x && x.a ? `${x.a === 1 ? '1 Gebots-Auktion' : NF0.format(x.a) + ' Gebots-Auktionen'}, ${x.hb ? 'höchstes Gebot ' + price(x.hb) : 'noch ohne Gebot'}. ` : ''}${I && I.live && I.live.b != null && Math.abs(I.live.b - (x && x.b || 0)) > .5 ? `Live laut SkyCofl gerade: Lowest BIN ${price(I.live.b)}. ` : ''}${pxNote()}</p>
       ${x && x.v ? `<table class="mk-mini mk-var"><thead><tr><th class="l nosort">${id.startsWith('PET_') ? 'Rarity' : 'Stufe'}</th><th class="nosort">Lowest BIN</th></tr></thead><tbody>${Object.entries(x.v).sort((a, b) => a[1] - b[1]).map(([v, p]) => `<tr class="static"><td class="l">${esc(title(v))}</td><td>${price(p)}</td></tr>`).join('')}</tbody></table>` : ''}`;
   }
   return `<div class="ahead"><div><h1>${esc(nm(id))}</h1>
@@ -508,6 +509,7 @@ async function mountItem(){
       const v = x => x.status === 'fulfilled' ? x.value : null;
       I.hAll = ahPoints(v(full)); I.h1 = I.hAll.filter(p => p.t >= Date.parse(y)); I.h7 = ahPoints(v(week));
       I.ah = {sold: soldStats(v(sold))};
+      if (!K.px || pxAge() > 20 * 60e3){ const lb = await getJSON(COFL + `auctions/tag/${enc}/active/bin`, 60e3).catch(() => null); if (Array.isArray(lb) && lb.length) I.live = {b: Math.min(...lb.map(a => a.startingBid / (a.count || 1)))}; }
     }
   }catch(e){ I.err.push(e.message); }
   if (K.it !== I) return;
@@ -632,7 +634,7 @@ const facts = rows => `<dl class="facts">${rows.filter(Boolean).map(([k, v]) => 
 function glanceHTML(I){
   const A = I.A, h = K.hy && K.hy[I.id], o = K.md && K.md.items[I.id];
   return `<dl class="facts mk-glance">
-    ${[[I.k.bz ? 'Tagesmittel (Basis der Kennzahlen)' : 'Ø Verkaufspreis am Tag', A.p ? price(A.p) : '–'], ['7 Tage', PC(A.c7)], ['30 Tage', PC(A.c30)], ['1 Jahr', PC(A.c365)],
+    ${[[I.k.bz ? 'Tagesmittel (Basis der Kennzahlen)' : I.id.startsWith('PET_') ? 'Ø Verkaufspreis am Tag (alle Rarities)' : 'Ø Verkaufspreis am Tag', A.p ? price(A.p) : '–'], ['7 Tage', PC(A.c7)], ['30 Tage', PC(A.c30)], ['1 Jahr', PC(A.c365)],
        ['Schwankung pro Tag', A.vol != null ? P(A.vol, false) : '–'], ['Kategorie', catOf(I.id) ? esc(secLabel(catOf(I.id))) : '–'], ['NPC-Verkaufspreis', h && h.npc_sell_price ? price(h.npc_sell_price) : 'keiner'], ['Lebenszyklus', esc(A.life.stage)]]
       .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
 }
