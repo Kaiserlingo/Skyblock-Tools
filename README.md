@@ -12,9 +12,11 @@ css/style.css              Design
 js/chart.js                Chart mit Zoom, Indikatoren und Zeichenwerkzeugen
 js/app.js                  Startbildschirm, Bazaar Flipper (pausiert), gemeinsame Helfer
 js/econ.js                 Rechenfunktionen der Markt-Analyse (Index, Renditen, Risiko, Elastizität …)
+js/categories.js           Kategorien aller Items (Mining, Farming, Weapons …)
 js/markt.js                Markt-Analyse: Übersicht, Alle Items, Updates & Mayors, Item-Analyse
 data/recipes.json          Crafting-Rezepte (automatisch aktualisiert)
 tools/update_recipes.py    erzeugt recipes.json aus dem NotEnoughUpdates-REPO
+tools/build_prices.mjs     baut prices.json (Lowest BIN aller Auction-House-Items, etwa alle 5 Minuten)
 tools/build_market.mjs     baut täglich market.json (Tagesdaten aller Bazaar-Items, Indizes, Update-/Mayor-Wirkung)
 tools/stamp_assets.py      hängt Versions-Hashes an CSS/JS (vor jedem Commit ausführen)
 tests/                     Prüfungen aller Zahlen (Python + Playwright, numpy)
