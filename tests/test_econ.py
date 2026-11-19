@@ -84,10 +84,11 @@ check('sbDate epoch', 1.0, float(r[10]['day']))
 
 # Ereignis- und Amtszeit-Renditen
 r = node("""const d=86400000, b=Date.UTC(2026,0,1), t=[], v=[]; for(let i=0;i<40;i++){t.push(b+i*d); v.push(100+i);}
-  const ev=E.eventReturns(t,v,b+10*d+5*3600e3,[1,3,7,60]);
+  const ev=E.eventReturns(t,v,b+10*d+5*3600e3,[1,3,7,60]); const ew=E.eventReturns(t,v,b+10*d,[1,3,7],3);
   const tr=E.termReturns(t,v,[{name:'A',start:b+20*d+11*3600e3,end:b+25*d+15*3600e3},{name:'B',start:b+38*d,end:b+43*d}]);
-  return {ev, tr, g:E.groupBy([{n:'x',r:.1},{n:'x',r:-.3},{n:'y',r:null}],'n','r')};""")
+  return {ev, ew, tr, g:E.groupBy([{n:'x',r:.1},{n:'x',r:-.3},{n:'y',r:null}],'n','r')};""")
 check('event d1', 111 / 109 - 1, r['ev']['d1']); check('event d7', 117 / 109 - 1, r['ev']['d7']); check('event future', None, r['ev']['d60'])
+check('event window pre=107..109, d7 post=115..117', 116/108 - 1, r['ew']['d7']); check('event window d1 single', 111/108 - 1, r['ew']['d1']); check('event window d3', 112/108 - 1, r['ew']['d3'])
 # Amtszeit A: volle Tage 21..24 (Werte 121..124), davor Tage 15..19 (115..119)
 check('term ret', (122.5) / (117) - 1, r['tr'][0]['ret']); check('term incomplete skipped', 1.0, float(len(r['tr'])))
 check('group mean', -0.1, r['g']['x']['mean']); check('group up share', .5, r['g']['x']['up'])

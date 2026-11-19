@@ -221,7 +221,7 @@ function startBody(){
       ${m ? `<p class="mk-big">${esc(m.name)}${m.minister ? ` <span class="mut">mit Minister ${esc(m.minister.name)}</span>` : ''}</p>
         <ul class="mk-perks">${m.perks.map(p => `<li><b>${esc(p.name)}</b>${p.d ? ` ${esc(p.d)}` : ''}</li>`).join('')}${m.minister && m.minister.perk ? `<li><b>${esc(m.minister.perk)}</b> (Minister)${m.minister.d ? ` ${esc(m.minister.d)}` : ''}</li>` : ''}</ul>
         <p class="note">${m.term ? `Amtszeit bis ${fdt(m.term.end)} (${until(m.term.end - Date.now())}).` : (() => { const n = nextMayorChange(Date.now()); return n ? `Nächster Wechsel ${fdt(n)} (${until(n - Date.now())}).` : ''; })()}</p>
-        ${fx ? `<p class="note">In seinen letzten ${fx.terms} Amtszeiten ist der Markt im Schnitt ${fx.spi >= 0 ? 'um ' + P(fx.spi, false) + ' gestiegen' : 'um ' + P(-fx.spi, false) + ' gefallen'}. Am stärksten gegen den Markt gestiegen:</p>
+        ${fx ? `<p class="note">In seinen ${fx.terms} Amtszeiten im letzten Jahr hat sich der Markt typischerweise um ${P(fx.spi)} bewegt (Median). Diese Items steigen unter ${esc(m.name)} typischerweise stärker als der Markt:</p>
           <ul class="rank">${fx.top.slice(0, 3).map(r => li(r[0], `in ${r[2]} Amtszeiten, ${Math.round(r[3] * 100)} % davon gestiegen`, P(r[1]), 'gegenüber dem Markt')).join('')}</ul>` : ''}` : '<p class="loading">Lädt …</p>'}
     </section>
     <section><header><h2>Neuestes Update</h2><a class="link" href="#markt/updates">Alle Updates</a></header>
@@ -305,7 +305,7 @@ function drawList(){
       <td>${r.p ? price(r.p) : '<span class="mut">–</span>'}</td><td>${PC(r.c7)}</td><td>${PC(r.c30)}</td><td>${PC(r.c365)}</td><td>${r.v30 == null ? '<span class="mut">–</span>' : P(r.v30, false)}</td><td>${r.to ? fmt(r.to) : '<span class="mut">–</span>'}</td>${L.preset === 'mayor' ? `<td>${PC(r.myRaw)}</td>` : ''}</tr>`).join('')
       : `<tr class="emptyrow"><td colspan="8"><b>Nichts gefunden.</b> Prüf die Schreibweise oder wähl „Alles“.</td></tr>`}</tbody></table></div>
     ${pages > 1 ? `<div class="pager"><button class="btn ghost" data-mkpg="-1" ${L.page === 0 ? 'disabled' : ''}>Zurück</button><span>Seite ${L.page + 1} von ${pages}</span><button class="btn ghost" data-mkpg="1" ${L.page >= pages - 1 ? 'disabled' : ''}>Weiter</button></div>` : ''}
-    <p class="hint">Preis: Bazaar-Items live als Mittelkurs. Veränderungen und Schwankung aus Tagesdaten, siehe <a class="link" href="#markt/method">So wird gerechnet</a>.${L.preset === 'mayor' ? ' „Unter Mayor“: Ø-Veränderung in seinen Amtszeiten gegenüber dem Markt, nur Items mit mindestens 2 Amtszeiten.' : ''}</p>`;
+    <p class="hint">Preis: Bazaar-Items live als Mittelkurs. Veränderungen und Schwankung aus Tagesdaten, siehe <a class="link" href="#markt/method">So wird gerechnet</a>.${L.preset === 'mayor' ? ' „Unter Mayor“: typische Veränderung (Median) in seinen Amtszeiten gegenüber dem Markt, nur Items mit mindestens 2 Amtszeiten.' : ''}</p>`;
 }
 
 /* ---------- Updates & Mayors ---------- */
@@ -332,14 +332,14 @@ function updatesBody(){
   </article>`).join('')}</div>
 
   <h2 class="sec">Mayors</h2>
-  <p class="note mk-w">Jede Amtszeit dauert 124 Stunden. Gemessen wird der Ø-Preis in der Amtszeit gegenüber den 5 Tagen davor, im Vergleich zum Markt. Mayors wirken über ihre Perks: Mehr Drops oder mehr Fortune bedeuten mehr Angebot und meist fallende Preise, neue Aufgaben schaffen Nachfrage.</p>
+  <p class="note mk-w">Jede Amtszeit dauert 124 Stunden. Gemessen wird der Ø-Preis in der Amtszeit gegenüber den 5 Tagen davor, im Vergleich zum Markt, als Median über alle Amtszeiten. Mayors wirken über ihre Perks: Mehr Drops oder mehr Fortune bedeuten mehr Angebot und meist fallende Preise, neue Aufgaben schaffen Nachfrage.</p>
   ${cand && cand.length ? `<div class="mk-vote"><h3 class="mk-h4">Laufende Wahl (Jahr ${K.election.current.year})</h3>${cand.slice().sort((a, b) => b.votes - a.votes).map(c => `<div class="mk-vrow"><span>${esc(c.name)}</span><i style="--w:${tot ? (c.votes / tot * 100).toFixed(1) : 0}%"></i><b>${tot ? NF1.format(c.votes / tot * 100) + ' %' : '–'}</b>${md.mayorFx[c.name] ? `<button class="link" data-mkmayor="${esc(c.name)}">Was passiert unter ${esc(c.name)}?</button>` : ''}</div>`).join('')}</div>` : ''}
-  <div class="tablewrap"><table class="mk-table"><thead><tr><th class="l nosort">Mayor</th><th class="nosort">Amtszeiten im letzten Jahr</th><th class="nosort">Markt Ø</th><th class="l nosort">stärkster Sektor</th><th class="l nosort">schwächster Sektor</th></tr></thead><tbody>
+  <div class="tablewrap"><table class="mk-table"><thead><tr><th class="l nosort">Mayor</th><th class="nosort">Amtszeiten im letzten Jahr</th><th class="nosort">Markt typisch</th><th class="l nosort">stärkster Sektor</th><th class="l nosort">schwächster Sektor</th></tr></thead><tbody>
     ${Object.entries(md.mayorFx).sort((a, b) => b[1].terms - a[1].terms).map(([n, f]) => { const s = Object.entries(f.sec).filter(([, v]) => v != null).sort((a, b) => b[1] - a[1]); return `<tr data-mkmayor="${esc(n)}" class="${n === sel ? 'cur' : ''}"><td class="l"><b>${esc(n)}</b>${(curMayor() || {}).name === n ? ' <span class="mut">im Amt</span>' : ''}</td><td>${f.terms}</td><td>${PC(f.spi)}</td><td class="l">${s[0] ? esc(secLabel(s[0][0])) + ' ' + PC(s[0][1]) : '–'}</td><td class="l">${s.length ? esc(secLabel(s[s.length - 1][0])) + ' ' + PC(s[s.length - 1][1]) : '–'}</td></tr>`; }).join('')}
   </tbody></table></div>
   ${mf ? `<div class="two mk-mf"><div><h4 class="mk-h4">Unter ${esc(sel)} typischerweise gestiegen</h4><ul class="rank">${mf.top.map(r => li(r[0], P(r[1]), `${r[2]} Amtszeiten, ${Math.round(r[3] * 100)} % gestiegen`)).join('')}</ul></div>
     <div><h4 class="mk-h4">Unter ${esc(sel)} typischerweise gefallen</h4><ul class="rank">${mf.flop.map(r => li(r[0], P(r[1]), `${r[2]} Amtszeiten, ${Math.round(r[3] * 100)} % gestiegen`)).join('')}</ul></div></div>
-    <p class="hint">Bei nur 2 bis 3 Amtszeiten kann ein einzelner Ausreißer das Ergebnis tragen. Je mehr Amtszeiten und je öfter gestiegen, desto belastbarer.</p>` : ''}
+    <p class="hint">Median über mindestens 3 Amtszeiten, nur Items mit ruhigem Preis. Je mehr Amtszeiten und je öfter gestiegen, desto belastbarer.</p>` : ''}
 
   <h2 class="sec">Letzte Amtszeiten</h2>
   <div class="tablewrap"><table class="mk-table"><thead><tr><th class="l nosort">Mayor</th><th class="l nosort">Minister</th><th class="l nosort">von</th><th class="l nosort">bis</th></tr></thead><tbody>
@@ -364,8 +364,8 @@ function pageMethod(){
     <li><b>Marktpreis eines Bazaar-Items pro Tag</b>: Instabuy- und Instasell-Preis, gewichtet mit den Stück, die zu diesem Preis gehandelt werden. Einzelne Preisspitzen (mehr als 3 robuste Standardabweichungen vom Median der umliegenden 7 Tage) werden durch diesen Median ersetzt.</li>
     <li><b>Auktionshaus</b>: Kennzahlen rechnen mit dem günstigsten Verkauf pro Tag. Der Durchschnitt wird durch aufgewertete Exemplare (Sterne, Enchants, Reforges) verzerrt.</li>
     <li><b>Preisindex</b>: gewichteter geometrischer Mittelwert der Preisveränderungen (wie bei Verbraucherpreisindizes). Gewicht = Umsatz in Coins, ein Item höchstens 8 %. Nur Items mit mindestens ${words((K.md && K.md.indexMin) || 2e7)} Coins Umsatz am Tag, mindestens 100 Instabuys und 100 Instasells am Tag und Daten an 95 % der Tage.</li>
-    <li><b>Wirkung eines Updates</b>: Preis am Tag vor dem Update gegenüber 1, 3, 7 und 14 Tagen danach. Bei Items zusätzlich minus Index („gegenüber dem Markt“).</li>
-    <li><b>Wirkung eines Mayors</b>: Ø-Preis in den vollen Tagen der Amtszeit gegenüber den 5 Tagen davor, minus dieselbe Rechnung für den Index. Mittelwert über alle Amtszeiten im letzten Jahr.</li>
+    <li><b>Wirkung eines Updates</b>: Ø der 3 Tage vor dem Update gegenüber dem Preis 1 Tag danach und dem Ø der jeweils letzten 3 Tage bis 3, 7 und 14 Tage danach. Die Fenster glätten das Tagesrauschen. Bei Items zusätzlich minus Index („gegenüber dem Markt“). In den Ranglisten nur Items, deren Preis am Tag im Schnitt um höchstens 25 % schwankt.</li>
+    <li><b>Wirkung eines Mayors</b>: Ø-Preis in den vollen Tagen der Amtszeit gegenüber den 5 Tagen davor, minus dieselbe Rechnung für den Index. Zusammengefasst als Median über alle Amtszeiten im letzten Jahr, in Ranglisten nur mit mindestens 3 Amtszeiten.</li>
     <li><b>Schwankung (Volatilität)</b>: Standardabweichung der täglichen Log-Renditen der letzten 30 Tage.</li>
     <li><b>Value at Risk 95 %</b>: an 95 von 100 Tagen fiel der Preis nicht stärker als dieser Wert (aus dem letzten Jahr gemessen). Expected Shortfall: Ø-Verlust an den übrigen 5 %.</li>
     <li><b>Preiselastizität</b>: Regression von ln(Wochenmenge) auf ln(Ø-Wochenpreis), nicht überlappende Wochen. Mit 95-%-Konfidenzintervall.</li>
@@ -529,7 +529,7 @@ function analyze(I){
     const done = md.terms.filter(t => t.end <= md.built && t.start >= A.T[0] + 6 * DAY);   // wie in der Pipeline
     const mine = E.termReturns(A.T, A.v, done), mkt = new Map(E.termReturns(A.T, A.spi, done).map(x => [x.start, x.ret]));
     A.my = E.groupBy(mine.map(x => ({name: x.name, abn: mkt.has(x.start) ? x.ret - mkt.get(x.start) : null})), 'name', 'abn');
-    A.ev = md.news.map(nw => { const a = E.eventReturns(A.T, A.v, nw.date, [1, 7]), b = E.eventReturns(A.T, A.spi, nw.date, [7]); return {nw, d1: a.d1, d7: a.d7, abn: a.d7 != null && b.d7 != null ? a.d7 - b.d7 : null}; });
+    A.ev = md.news.map(nw => { const w = md.eventWindow || 1, a = E.eventReturns(A.T, A.v, nw.date, [1, 7], w), b = E.eventReturns(A.T, A.spi, nw.date, [7], w); return {nw, d1: a.d1, d7: a.d7, abn: a.d7 != null && b.d7 != null ? a.d7 - b.d7 : null}; });
   }
   // Lebenszyklus
   const first = I.hAll && I.hAll.length ? I.hAll[0].t : (I.h1 && I.h1.length && I.h1[0].t > Date.now() - 300 * DAY ? I.h1[0].t : null);
@@ -696,15 +696,15 @@ function politicsHTML(I){
   const A = I.A; if (!A.my) return card('Politik: Wirkung der Mayors', '', '<p class="loading">Mayor-Daten laden …</p>');
   const cur = curMayor(), cand = K.election && K.election.current && K.election.current.candidates;
   const lead = cand && cand.length ? cand.slice().sort((a, b) => b.votes - a.votes)[0].name : null;
-  const rows = Object.entries(A.my).sort((a, b) => b[1].mean - a[1].mean);
-  return card('Politik: Wirkung der Mayors', 'Ø-Preis in der Amtszeit gegenüber den 5 Tagen davor, minus dieselbe Veränderung des Gesamtmarkts. Positiv heißt: Unter diesem Mayor wird das Item gefragter oder knapper.',
-    rows.length ? `<table class="mk-mini"><thead><tr><th class="l nosort">Mayor</th><th class="nosort">Amtszeiten</th><th class="nosort">gegenüber Markt</th><th class="nosort">gestiegen</th></tr></thead><tbody>
-      ${rows.map(([n, g]) => `<tr class="static ${cur && cur.name === n ? 'cur' : ''}"><td class="l">${esc(n)}${cur && cur.name === n ? ' <span class="mut">im Amt</span>' : lead === n ? ' <span class="mut">führt in der Wahl</span>' : ''}</td><td>${g.n}</td><td>${PC(g.mean)}</td><td>${Math.round(g.up * 100)} %</td></tr>`).join('')}</tbody></table>
-      <p class="note">Bei 1 bis 2 Amtszeiten ist das Ergebnis Zufall-anfällig.</p>` : '<p class="note">Zu wenig Daten in den Amtszeiten des letzten Jahres.</p>');
+  const rows = Object.entries(A.my).sort((a, b) => b[1].median - a[1].median);
+  return card('Politik: Wirkung der Mayors', 'Ø-Preis in der Amtszeit gegenüber den 5 Tagen davor, minus dieselbe Veränderung des Gesamtmarkts. Positiv heißt: Unter diesem Mayor wird das Item gefragter oder knapper. Der Median ist robuster als der Durchschnitt, weil eine einzelne verrückte Amtszeit ihn nicht verzerrt.',
+    rows.length ? `<table class="mk-mini"><thead><tr><th class="l nosort">Mayor</th><th class="nosort">Amtszeiten</th><th class="nosort">typisch (Median)</th><th class="nosort">Ø</th><th class="nosort">gestiegen</th></tr></thead><tbody>
+      ${rows.map(([n, g]) => `<tr class="static ${cur && cur.name === n ? 'cur' : ''}"><td class="l">${esc(n)}${cur && cur.name === n ? ' <span class="mut">im Amt</span>' : lead === n ? ' <span class="mut">führt in der Wahl</span>' : ''}</td><td>${g.n}</td><td>${PC(g.median)}</td><td>${PC(g.mean)}</td><td>${Math.round(g.up * 100)} %</td></tr>`).join('')}</tbody></table>
+      <p class="note">Bei 1 bis 2 Amtszeiten ist das Ergebnis stark vom Zufall abhängig.</p>` : '<p class="note">Zu wenig Daten in den Amtszeiten des letzten Jahres.</p>');
 }
 function updatesItemHTML(I){
   const A = I.A; if (!A.ev) return card('Wirkung der Updates', '', '<p class="loading">Lädt …</p>');
-  return card('Wirkung der Updates', 'Preis am Tag vor dem Update gegenüber 1 und 7 Tagen danach. „Gegenüber Markt“ zieht die Bewegung des Preisindex ab. Große Ausschläge zeigen, welche Updates dieses Item wirklich betroffen haben.',
+  return card('Wirkung der Updates', 'Vorher: Ø der 3 Tage vor dem Update. 1 Tag: Preis am Tag danach. 7 Tage: Ø der Tage 5 bis 7 danach. „Gegenüber Markt“ zieht die Bewegung des Preisindex ab. Große Ausschläge zeigen, welche Updates dieses Item wirklich betroffen haben.',
     `<table class="mk-mini"><thead><tr><th class="l nosort">Update</th><th class="nosort">1 Tag</th><th class="nosort">7 Tage</th><th class="nosort">gegenüber Markt</th></tr></thead><tbody>
       ${A.ev.map(e => `<tr class="static"><td class="l"><a class="link" href="${esc(e.nw.link)}" target="_blank" rel="noopener">${esc(e.nw.title.replace(/^SkyBlock\s*/, ''))}</a> <span class="mut">${fdate(e.nw.date)}</span></td><td>${PC(e.d1)}</td><td>${PC(e.d7)}</td><td>${PC(e.abn)}</td></tr>`).join('')}</tbody></table>`);
 }

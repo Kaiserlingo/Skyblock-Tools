@@ -130,11 +130,13 @@ for (const s in SECTORS){
 
 /* ---------- Wirkung von Updates (Patchnotes) ---------- */
 const liquidIds = ids.filter(id => series[id] && turnover(id) >= LIQUID && tradedBoth(id) && cover(series[id].v) >= .8);
+const W = 3;   // Ereignis-Fenster in Tagen (siehe E.eventReturns)
+const calm = id => { const x = E.volatility(series[id].v, 30); return x != null && x <= .25; };
 const updates = newsList.map(n => {
-  const m = E.eventReturns(T, spi.v, n.date, [1, 3, 7, 14]);
-  const sec = {}; for (const s in secIdx) sec[s] = r4(E.eventReturns(T, secIdx[s].v, n.date, [7]).d7);
+  const m = E.eventReturns(T, spi.v, n.date, [1, 3, 7, 14], W);
+  const sec = {}; for (const s in secIdx) sec[s] = r4(E.eventReturns(T, secIdx[s].v, n.date, [7], W).d7);
   const rows = [];
-  for (const id of liquidIds){ const r = E.eventReturns(T, series[id].v, n.date, [7]).d7; if (r != null && m.d7 != null) rows.push([id, r4(r - m.d7), r4(r)]); }
+  for (const id of liquidIds){ if (!calm(id)) continue; const r = E.eventReturns(T, series[id].v, n.date, [7], W).d7; if (r != null && m.d7 != null) rows.push([id, r4(r - m.d7), r4(r)]); }
   rows.sort((a, b) => b[1] - a[1]);
   const big = rows.filter(r => Math.abs(r[1]) >= .1).length;
   return {title: n.title, link: n.link, date: n.date, spi: {d1: r4(m.d1), d3: r4(m.d3), d7: r4(m.d7), d14: r4(m.d14)}, sec, n: rows.length, big,
@@ -146,21 +148,21 @@ const doneTerms = terms.filter(m => m.end <= now && m.start >= T[0] + 6 * DAY);
 const spiTerms = E.termReturns(T, spi.v, doneTerms);
 const spiByStart = new Map(spiTerms.map(x => [x.start, x.ret]));
 const mayorFx = {};
-for (const g of Object.entries(E.groupBy(spiTerms, 'name', 'ret'))) mayorFx[g[0]] = {terms: g[1].n, spi: r4(g[1].mean), sec: {}, top: [], flop: []};
+for (const g of Object.entries(E.groupBy(spiTerms, 'name', 'ret'))) mayorFx[g[0]] = {terms: g[1].n, spi: r4(g[1].median), spiMean: r4(g[1].mean), sec: {}, top: [], flop: []};
 for (const s in secIdx){
   const g = E.groupBy(E.termReturns(T, secIdx[s].v, doneTerms), 'name', 'ret');
-  for (const k in g) if (mayorFx[k]) mayorFx[k].sec[s] = r4(g[k].mean);
+  for (const k in g) if (mayorFx[k]) mayorFx[k].sec[s] = r4(g[k].median);
 }
 const itemMy = {};
 for (const id of ids){
   if (!series[id]) continue;
   const rows = E.termReturns(T, series[id].v, doneTerms).map(x => ({name: x.name, abn: spiByStart.has(x.start) ? x.ret - spiByStart.get(x.start) : null}));
   const g = E.groupBy(rows, 'name', 'abn'); const o = {};
-  for (const k in g) o[k] = [r4(g[k].mean), g[k].n, r4(g[k].up)];
+  for (const k in g) o[k] = [r4(g[k].median), g[k].n, r4(g[k].up), r4(g[k].mean)];
   itemMy[id] = o;
 }
 for (const k in mayorFx){
-  const rows = liquidIds.filter(id => itemMy[id] && itemMy[id][k] && itemMy[id][k][1] >= 2).map(id => [id, itemMy[id][k][0], itemMy[id][k][1], itemMy[id][k][2]]);
+  const rows = liquidIds.filter(id => calm(id) && itemMy[id] && itemMy[id][k] && itemMy[id][k][1] >= 3).map(id => [id, itemMy[id][k][0], itemMy[id][k][1], itemMy[id][k][2]]);
   rows.sort((a, b) => b[1] - a[1]); mayorFx[k].top = rows.slice(0, 10); mayorFx[k].flop = rows.slice(-10).reverse(); mayorFx[k].n = rows.length;
 }
 
@@ -182,7 +184,7 @@ for (const id of ids){
 
 const cur = election.mayor || {};
 const out = {
-  v: 2, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID, indexMin: INDEX_MIN, minWeek: MIN_WEEK,
+  v: 3, eventWindow: W, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID, indexMin: INDEX_MIN, minWeek: MIN_WEEK,
   sources: {bazaar: bz.lastUpdated, history: 'SkyCofl (sky.coflnet.com)', news: 'Hypixel /skyblock/news', mayors: 'SkyCofl /api/mayor'},
   sectors: Object.fromEntries(Object.entries(SECTORS).map(([k, l]) => [k, {label: l, items: ids.filter(id => sector(id) === k).length, index: secIdx[k] ? secIdx[k].n : 0}])),
   index: {spi: spi.v.map(r4), n: spi.n, sec: Object.fromEntries(Object.entries(secIdx).map(([k, x]) => [k, x.v]))},

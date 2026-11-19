@@ -195,13 +195,14 @@ E.chainIndex = function(series, len, cap = .08){
 };
 
 /* ---------- Ereignisse ---------- */
-// Preisänderung vom Tag vor dem Ereignis bis k Tage danach
-E.eventReturns = function(t, v, evT, ks = [1, 3, 7]){
-  const i0 = t.indexOf(E.dayStart(evT) - DAY), out = {};
-  for (const k of ks){
-    const i1 = t.indexOf(E.dayStart(evT) + k * DAY);
-    out['d' + k] = i0 >= 0 && i1 >= 0 && num(v[i0]) && num(v[i1]) && v[i0] > 0 ? v[i1] / v[i0] - 1 : null;
-  }
+// Preisänderung rund um ein Ereignis. Vorher = Ø der w Tage vor dem Ereignistag,
+// nachher (k Tage) = Ø der Tage k-w'+1 … k mit w' = min(w, k). Mit w = 1 einfache Tageswerte.
+// Ein Zeitfenster glättet Tagesrauschen, das bei billigen Items sonst ±50 % ausmachen kann.
+E.eventReturns = function(t, v, evT, ks = [1, 3, 7], w = 1){
+  const D = E.dayStart(evT), at = d => { const i = t.indexOf(d); return i >= 0 && num(v[i]) && v[i] > 0 ? v[i] : null; };
+  const avg = (from, to) => { const a = []; for (let d = from; d <= to; d += DAY){ const x = at(d); if (x == null) return null; a.push(x); } return a.length ? a.reduce((s, x) => s + x, 0) / a.length : null; };
+  const pre = avg(D - w * DAY, D - DAY), out = {};
+  for (const k of ks){ const ww = Math.min(w, k), post = avg(D + (k - ww + 1) * DAY, D + k * DAY); out['d' + k] = pre != null && post != null ? post / pre - 1 : null; }
   return out;
 };
 /* Wirkung einer Mayor-Amtszeit: Ø-Preis in der Amtszeit (nur volle Tage) gegenüber
