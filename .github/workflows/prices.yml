@@ -1,14 +1,20 @@
 name: Live-Preise (Auction House)
 
-# Liest alle 10 Minuten alle aktiven Auktionen von Hypixel und schreibt den Lowest BIN
-# jedes Items nach prices.json auf dem Branch "data". Die Website lädt sie von dort.
+# Liest alle aktiven Auktionen von Hypixel und schreibt den Lowest BIN jedes Items
+# nach prices.json auf dem Branch "data". Die Website lädt sie von dort.
+#
+# Takt: Jeder Lauf startet nach etwa 5 Minuten selbst den nächsten (workflow_dispatch),
+# weil GitHubs Zeitplan (cron) oft stark verspätet oder gar nicht auslöst.
+# Der Zeitplan unten startet die Kette neu, falls sie einmal abreißt.
+# Anhalten: unter Actions den Workflow "Live-Preise" deaktivieren.
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: data-branch
@@ -17,7 +23,7 @@ concurrency:
 jobs:
   prices:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
@@ -31,3 +37,13 @@ jobs:
         run: node tools/build_prices.mjs prices.json pub/prices.json
       - name: Veröffentlichen
         run: tools/data_branch.sh publish pub prices.json
+      - name: Nächsten Lauf planen
+        if: always()
+        run: |
+          sleep 240
+          waiting=0
+          for s in queued pending waiting requested; do
+            n=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/prices.yml/runs?status=$s" --jq '.total_count')
+            waiting=$((waiting + n))
+          done
+          if [ "$waiting" -eq 0 ]; then gh workflow run prices.yml --ref "${GITHUB_REF_NAME}"; else echo "Es wartet schon ein Lauf."; fi
