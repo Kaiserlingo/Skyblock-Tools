@@ -362,7 +362,7 @@ function pageMethod(){
   <h2 class="sec">Rechenregeln</h2>
   <ul class="rules mk-w">
     <li><b>Marktpreis eines Bazaar-Items pro Tag</b>: Instabuy- und Instasell-Preis, gewichtet mit den Stück, die zu diesem Preis gehandelt werden. Einzelne Preisspitzen (mehr als 3 robuste Standardabweichungen vom Median der umliegenden 7 Tage) werden durch diesen Median ersetzt.</li>
-    <li><b>Auktionshaus</b>: Kennzahlen rechnen mit dem günstigsten Verkauf pro Tag. Der Durchschnitt wird durch aufgewertete Exemplare (Sterne, Enchants, Reforges) verzerrt.</li>
+    <li><b>Auktionshaus</b>: Kennzahlen rechnen mit dem Ø Verkaufspreis pro Tag, Ausreißer gefiltert wie beim Bazaar. Er enthält aufgewertete Exemplare (Sterne, Enchants, Reforges), das Niveau liegt darum über dem günstigsten Angebot. Für Veränderungen und Risiko zählt das kaum, weil die Mischung von Tag zu Tag ähnlich bleibt. Der günstigste Verkauf pro Tag ist zu unruhig, oft ist es ein beschädigtes oder falsch eingestelltes Exemplar.</li>
     <li><b>Preisindex</b>: gewichteter geometrischer Mittelwert der Preisveränderungen (wie bei Verbraucherpreisindizes). Gewicht = Umsatz in Coins, ein Item höchstens 8 %. Nur Items mit mindestens ${words((K.md && K.md.indexMin) || 2e7)} Coins Umsatz am Tag, mindestens 100 Instabuys und 100 Instasells am Tag und Daten an 95 % der Tage.</li>
     <li><b>Wirkung eines Updates</b>: Ø der 3 Tage vor dem Update gegenüber dem Preis 1 Tag danach und dem Ø der jeweils letzten 3 Tage bis 3, 7 und 14 Tage danach. Die Fenster glätten das Tagesrauschen. Bei Items zusätzlich minus Index („gegenüber dem Markt“). In den Ranglisten nur Items, deren Preis am Tag im Schnitt um höchstens 25 % schwankt.</li>
     <li><b>Wirkung eines Mayors</b>: Ø-Preis in den vollen Tagen der Amtszeit gegenüber den 5 Tagen davor, minus dieselbe Rechnung für den Index. Zusammengefasst als Median über alle Amtszeiten im letzten Jahr, in Ranglisten nur mit mindestens 3 Amtszeiten.</li>
@@ -441,7 +441,7 @@ async function mountItem(){
         getJSON(COFL + `item/price/${enc}`, 5 * 60e3), getJSON(COFL + `item/price/${enc}/current`, 60e3),
         getJSON(COFL + `auctions/tag/${enc}/active/bin`, 60e3), getJSON(COFL + `auctions/tag/${enc}/sold`, 5 * 60e3)]);
       const v = x => x.status === 'fulfilled' ? x.value : null;
-      I.hAll = ahPoints(v(full)); I.h1 = I.hAll.filter(p => p.t >= now - 366 * DAY); I.h7 = ahPoints(v(week));
+      I.hAll = ahPoints(v(full)); I.h1 = I.hAll.filter(p => p.t >= Date.parse(y)); I.h7 = ahPoints(v(week));
       I.ah = {stats: v(stats), cur: v(cur), bins: Array.isArray(v(bins)) ? v(bins) : [], sold: soldStats(v(sold))};
     }
   }catch(e){ I.err.push(e.message); }
@@ -454,7 +454,7 @@ function bzPoints(h){
     .filter(p => isFinite(p.t)).sort((a, b) => a.t - b.t);
 }
 function ahPoints(h){
-  return (Array.isArray(h) ? h : []).map(o => ({t: E.parseUtc(o.time), min: +o.min || null, max: +o.max || null, avg: +o.avg || null, vol: +o.volume || 0, v: +o.min || null}))
+  return (Array.isArray(h) ? h : []).map(o => ({t: E.parseUtc(o.time), min: +o.min || null, max: +o.max || null, avg: +o.avg || null, vol: +o.volume || 0, v: +o.avg || null}))
     .filter(p => isFinite(p.t)).sort((a, b) => a.t - b.t);
 }
 function soldStats(a){
@@ -496,7 +496,7 @@ function feedItemChart(){
                   marks: K.itMarks && md ? md.news.map(x => ({t: x.date, label: x.title.replace(/^SkyBlock\s*/, '')})) : []});
   const note = $('#mi-cnote');
   if (note) note.innerHTML = (I.k.bz ? 'Bernstein: Instabuy (niedrigste Sell-Offer), Grün: Instasell (höchste Buy-Order). Unten: Menge in Sell-Offers und Buy-Orders.'
-    : 'Bernstein: Ø Verkaufspreis, Grün: günstigster Verkauf. Unten: Zahl der Verkäufe.') + ' Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles. Prices provided by SkyCofl.';
+    : 'Bernstein: Ø Verkaufspreis, Grün: günstigster Verkauf. Unten: Zahl der Verkäufe. Die Kennzahlen rechnen mit dem Ø Verkaufspreis pro Tag (Ausreißer gefiltert), weil der günstigste Verkauf oft ein beschädigtes oder falsch eingestelltes Exemplar ist.') + ' Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles. Prices provided by SkyCofl.';
 }
 
 /* ---------- Kennzahlen eines Items ---------- */
@@ -505,7 +505,7 @@ function analyze(I){
   const T = md ? K.mdT : null, end = md ? md.days.to : E.dayStart(Date.now());
   const days = T ? T.length : 366;
   const d = E.daily((I.h1 || []).map(p => ({t: p.t, v: p.v})), {days, end});
-  A.T = d.t; A.v = I.k.bz ? E.hampel(d.v) : d.v;
+  A.T = d.t; A.v = E.hampel(d.v);
   A.spi = md ? md.index.spi : null;
   A.L = E.lastIdx(A.v); A.p = A.L >= 0 ? A.v[A.L] : null;
   for (const k of [1, 7, 30, 90]) A['c' + k] = E.change(A.v, k);
@@ -567,8 +567,8 @@ const facts = rows => `<dl class="facts">${rows.filter(Boolean).map(([k, v]) => 
 function glanceHTML(I){
   const A = I.A, h = K.hy && K.hy[I.id], o = K.md && K.md.items[I.id];
   return `<dl class="facts mk-glance">
-    ${[['Marktpreis', A.p ? price(A.p) : '–'], ['7 Tage', PC(A.c7)], ['30 Tage', PC(A.c30)], ['1 Jahr', PC(A.c365)],
-       ['Schwankung pro Tag', A.vol != null ? P(A.vol, false) : '–'], ['Sektor', o ? esc(secLabel(o.s)) : '–'], ['NPC-Verkaufspreis', h && h.npc_sell_price ? price(h.npc_sell_price) : 'keiner'], ['Lebenszyklus', esc(A.life.stage)]]
+    ${[[I.k.bz ? 'Marktpreis' : 'Ø Verkaufspreis (Tag)', A.p ? price(A.p) : '–'], ['7 Tage', PC(A.c7)], ['30 Tage', PC(A.c30)], ['1 Jahr', PC(A.c365)],
+       ['Schwankung pro Tag', A.vol != null ? P(A.vol, false) : '–'], o ? ['Sektor', esc(secLabel(o.s))] : ['Kategorie', h && h.category ? esc(title(h.category)) : '–'], ['NPC-Verkaufspreis', h && h.npc_sell_price ? price(h.npc_sell_price) : 'keiner'], ['Lebenszyklus', esc(A.life.stage)]]
       .map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
 }
 
@@ -641,7 +641,8 @@ function recipesMap(){
 function marketPrice(I){ const r = liveRow(I.id); if (I.k.bz && r && r.topBuy && r.topSell) return {buy: r.topSell, sell: r.topBuy}; if (I.ah && I.ah.cur && I.ah.cur.buy) return {buy: I.ah.cur.buy, sell: I.ah.sold ? I.ah.sold.q50 : null}; return null; }
 function corridorHTML(I){
   const h = K.hy && K.hy[I.id], npc = h && h.npc_sell_price, c = craftResult(I, 'order'), mp = marketPrice(I);
-  const rows = [['NPC-Verkaufspreis (Untergrenze)', npc ? price(npc) : 'keiner'], ['Herstellkosten per Buy-Order (Obergrenze)', c ? price(c.craft) : 'kein Bazaar-Rezept'], ['Marktpreis jetzt', mp ? `${price(mp.sell)} bis ${price(mp.buy)}` : '–']];
+  const rows = [['NPC-Verkaufspreis (Untergrenze)', npc ? price(npc) : 'keiner'], ['Herstellkosten per Buy-Order (Obergrenze)', c ? price(c.craft) : 'kein Bazaar-Rezept'],
+    I.k.bz ? ['Marktpreis jetzt', mp ? `${price(mp.sell)} bis ${price(mp.buy)}` : '–'] : ['Günstigster Sofortkauf jetzt', mp ? price(mp.buy) : '–']];
   let verdict = '';
   if (mp && npc && mp.buy && mp.buy < npc) verdict = `<p class="mk-alert">Der Kaufpreis liegt unter dem NPC-Preis: kaufen und an den NPC verkaufen bringt ${price(npc - mp.buy)} pro Stück. Solche Lücken schließen sich meist schnell.</p>`;
   else if (mp && c && mp.sell && mp.sell * (1 - BZ_TAX()) > c.craft) verdict = `<p class="mk-alert">Herstellen ist billiger als der Preis, den Käufer gerade zahlen: ${price(mp.sell * (1 - BZ_TAX()) - c.craft)} pro Stück nach Steuer. Das zieht neues Angebot an.</p>`;

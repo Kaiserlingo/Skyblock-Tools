@@ -20,6 +20,7 @@ const LIQUID = 5e6;            // Coins Umsatz pro Tag, ab dem ein Item in Rangl
 const INDEX_MIN = 2e7;         // … und ab dem es in die Preisindizes kommt
 const MIN_WEEK = 700;          // mindestens so viele Instabuys UND Instasells pro Woche (100 pro Tag)
 const r4 = x => x == null || !isFinite(x) ? null : Math.round(x * 1e4) / 1e4;
+const r6 = x => x == null || !isFinite(x) ? null : Math.round(x * 1e6) / 1e6;
 const sig = x => x == null || !isFinite(x) ? null : +x.toPrecision(5);
 
 async function get(url, tries = 5){
@@ -125,7 +126,7 @@ const spi = E.chainIndex(inIndex.map(id => ({v: series[id].v, w: turnover(id)}))
 const secIdx = {};
 for (const s in SECTORS){
   const m = inIndex.filter(id => sector(id) === s);
-  if (m.length >= 3) secIdx[s] = {v: E.chainIndex(m.map(id => ({v: series[id].v, w: turnover(id)})), DAYS).v.map(r4), n: m.length};
+  if (m.length >= 3) secIdx[s] = {v: E.chainIndex(m.map(id => ({v: series[id].v, w: turnover(id)})), DAYS).v.map(r6), n: m.length};
 }
 
 /* ---------- Wirkung von Updates (Patchnotes) ---------- */
@@ -187,7 +188,7 @@ const out = {
   v: 3, eventWindow: W, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID, indexMin: INDEX_MIN, minWeek: MIN_WEEK,
   sources: {bazaar: bz.lastUpdated, history: 'SkyCofl (sky.coflnet.com)', news: 'Hypixel /skyblock/news', mayors: 'SkyCofl /api/mayor'},
   sectors: Object.fromEntries(Object.entries(SECTORS).map(([k, l]) => [k, {label: l, items: ids.filter(id => sector(id) === k).length, index: secIdx[k] ? secIdx[k].n : 0}])),
-  index: {spi: spi.v.map(r4), n: spi.n, sec: Object.fromEntries(Object.entries(secIdx).map(([k, x]) => [k, x.v]))},
+  index: {spi: spi.v.map(r6), n: spi.n, sec: Object.fromEntries(Object.entries(secIdx).map(([k, x]) => [k, x.v]))},
   news: newsList, updates, terms: terms.slice(-80), mayorFx,
   election: {mayor: cur.name ? {name: cur.name, key: cur.key, perks: (cur.perks || []).map(p => p.name), minister: cur.minister ? cur.minister.name : null} : null},
   items,
