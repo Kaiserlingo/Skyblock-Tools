@@ -33,7 +33,7 @@ const DEFAULTS = {
   interval: 20, tax: 1.25, budget: 10_000_000, share: 10,
   preset: 'balanced',
   minVolH: 100, minTurnH: 2_000_000, minBalance: 30,
-  minProfit: 1, minPct: 2, maxPct: 50, maxMove: 10, hideRisky: true,
+  minProfit: 1, minPct: 2, maxPct: 50, maxDev: 8, hideRisky: true,
   craftBuy: 'order', craftSell: 'offer', craftMinProfit: 0, craftMinPct: 3,
   marketLiquidOnly: false,
   retentionH: 48, pageSize: 50, sound: true, theme: 'system',
@@ -44,13 +44,13 @@ const DEFAULTS = {
 //  Riskant    – auch langsame/schwankende Items, aber nur wenn die Marge das Risiko bezahlt
 const PRESETS = {
   safe:     {label:'Sicher', desc:'Sehr gefragte, stabile Items. Orders füllen sich schnell, Margen sind klein.',
-             minVolH: 500, minTurnH: 10_000_000, minBalance: 50, minPct: 1, maxPct: 20,  craftMinPct: 2, maxMove: 5,    hideRisky: true},
+             minVolH: 500, minTurnH: 10_000_000, minBalance: 50, minPct: 1, maxPct: 20,  craftMinPct: 2, maxDev: 3,    hideRisky: true},
   balanced: {label:'Ausgewogen', desc:'Gefragte Items mit spürbarer Marge – der beste Mix aus Tempo und Gewinn.',
-             minVolH: 100, minTurnH: 2_000_000,  minBalance: 30, minPct: 2, maxPct: 50,  craftMinPct: 3, maxMove: 10,   hideRisky: true},
+             minVolH: 100, minTurnH: 2_000_000,  minBalance: 30, minPct: 2, maxPct: 50,  craftMinPct: 3, maxDev: 8,    hideRisky: true},
   risky:    {label:'Riskant', desc:'Auch langsame oder schwankende Items – dafür muss die Marge hoch sein.',
-             minVolH: 10,  minTurnH: 250_000,    minBalance: 10, minPct: 5, maxPct: 300, craftMinPct: 5, maxMove: 1000, hideRisky: false},
+             minVolH: 10,  minTurnH: 250_000,    minBalance: 10, minPct: 5, maxPct: 300, craftMinPct: 5, maxDev: 1000, hideRisky: false},
 };
-const PRESET_KEYS = ['minVolH','minTurnH','minBalance','minPct','maxPct','craftMinPct','maxMove','hideRisky'];
+const PRESET_KEYS = ['minVolH','minTurnH','minBalance','minPct','maxPct','craftMinPct','maxDev','hideRisky'];
 // Klartext der Kriterien einer Strategie (für das Filter-Panel)
 function presetRules(p){
   return [
@@ -58,7 +58,7 @@ function presetRules(p){
     `mind. <b>${fmt(p.minTurnH)}</b> Coins Umsatz/h`,
     `schwächere Seite ≥ <b>${p.minBalance} %</b> der stärkeren`,
     `Marge <b>${NF1.format(p.minPct)}–${NF0.format(p.maxPct)} %</b> (Craft ≥ ${NF1.format(p.craftMinPct)} %)`,
-    p.maxMove >= 1000 ? 'Preisschwankung egal' : `Preis in der letzten Stunde max. <b>±${NF1.format(p.maxMove)} %</b> bewegt`,
+    p.maxDev >= 1000 ? 'Ausreißer im Orderbuch erlaubt' : `Top-Preis höchstens <b>${NF1.format(p.maxDev)} %</b> vom Durchschnitt im Orderbuch entfernt`,
     p.hideRisky ? 'Items mit Warnhinweis ausgeblendet' : 'Items mit Warnhinweis werden gezeigt',
   ];
 }
@@ -72,7 +72,7 @@ const SLIDERS = {
   minPct:      {label:'Min. Marge', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
   craftMinPct: {label:'Min. Marge pro Craft', steps:[0,0.5,1,1.5,2,3,4,5,7.5,10,15,20], f: v => NF1.format(v) + ' %'},
   maxPct:      {label:'Max. Marge', steps:[10,20,30,50,75,100,150,200,300,500], f: v => NF0.format(v) + ' %', hint:'Höhere Margen sind oft Manipulation oder kaum gehandelt.'},
-  maxMove:     {label:'Max. Preisbewegung (1 h)', steps:[1,2,3,5,7.5,10,15,25,50,1000], f: v => v >= 1000 ? 'aus' : '±' + NF1.format(v) + ' %', hint:'Blendet Items aus, deren Preis gerade stark springt.'},
+  maxDev:      {label:'Max. Ausreißer im Orderbuch', steps:[1,2,3,5,8,10,15,25,50,1000], f: v => v >= 1000 ? 'aus' : NF1.format(v) + ' %', hint:'Wie weit der oberste Preis vom gewichteten Durchschnitt der besten Orders abweichen darf. Fängt einzelne Lock- oder Dump-Orders ab.'},
   interval:    {label:'Aktualisierung alle', steps:[10,15,20,30,45,60,120], f: v => v + ' s', hint:'Hypixel aktualisiert den Bazaar etwa alle 20 Sekunden.'},
 };
 
@@ -97,7 +97,8 @@ const DEFAULT_SORT = {flips:{k:'pph',d:-1}, crafts:{k:'pph',d:-1}, market:{k:'wV
 function applyState(d){
   S.set = Object.assign({}, DEFAULTS, d.settings || {});
   if (S.set.preset === 'aggressive') S.set.preset = 'risky';           // alte Bezeichnung
-  if (S.set.preset in PRESETS && S.set.maxMove == null) Object.assign(S.set, pick(PRESETS[S.set.preset], PRESET_KEYS));
+  if (S.set.maxDev == null) S.set.maxDev = (PRESETS[S.set.preset] || PRESETS.balanced).maxDev;
+  delete S.set.maxMove;
   S.watch = Array.isArray(d.watch) ? d.watch : [];
   S.alerts = Array.isArray(d.alerts) ? d.alerts : [];
   S.sort = Object.assign({}, DEFAULT_SORT, d.sort || {});
@@ -284,8 +285,12 @@ async function poll(){
 function schedule(){
   clearTimeout(S.timer);
   if (S.paused){ S.nextAt = 0; return; }
-  S.nextAt = Date.now() + S.set.interval*1000;
-  S.timer = setTimeout(poll, S.set.interval*1000);
+  // Nächster Abruf kurz nach dem nächsten Hypixel-Update – so holen alle Browser dieselbe Momentaufnahme
+  const now = Date.now(), iv = S.set.interval * 1000;
+  let next = S.lastUpdated && S.state === 'ok' ? S.lastUpdated + iv + 1500 : now + iv;
+  next = Math.min(Math.max(next, now + 4000), now + iv);
+  S.nextAt = next;
+  S.timer = setTimeout(poll, next - now);
 }
 function ingest(fresh){
   const t = S.lastUpdated || Date.now();
@@ -344,21 +349,20 @@ function compute(id, p){
     risk: [], d1h: null, d24h: null,
   };
 }
+// Bewertung eines Items – ausschließlich aus Daten, die für alle gleich sind:
+// dem Hypixel-Snapshot und (für Trends) dem Verlauf von SkyCofl. Nichts hängt davon ab,
+// wie lange dieser Browser schon offen ist.
 function assess(r){
-  const h = S.hist[r.id];
-  const now = S.lastUpdated || Date.now();
-  if (h && h.t.length){
-    const s1 = valueAt(h, now - HOUR, 's'), s24 = valueAt(h, now - 24*HOUR, 's');
-    r.d1h = s1 ? (r.topSell - s1) / s1 * 100 : null;
-    r.d24h = s24 ? (r.topSell - s24) / s24 * 100 : null;
-    if (h.t.length >= 20){
-      const ms = median(h.s.slice(-400)), mb = median(h.b.slice(-400));
-      if (ms && r.topSell > ms * 2.5) r.risk.push('Sell-Preis liegt weit über dem bisherigen Median (' + price(ms) + ') – mögliche Manipulation');
-      if (mb && r.topBuy && r.topBuy < mb * 0.4) r.risk.push('Buy-Order-Preis ist eingebrochen (Median ' + price(mb) + ')');
-    }
-  }
+  const q = S.products[r.id] && S.products[r.id].quick_status;
+  // Abweichung des obersten Preises vom gewichteten Durchschnitt der besten Orders (Hypixel quick_status)
+  const devS = q && q.buyPrice && r.topSell ? Math.abs(r.topSell - q.buyPrice) / q.buyPrice * 100 : 0;
+  const devB = q && q.sellPrice && r.topBuy ? Math.abs(r.topBuy - q.sellPrice) / q.sellPrice * 100 : 0;
+  r.dev = Math.max(devS, devB);
+  if (r.dev > 25) r.risk.push('Der oberste Preis weicht stark vom Durchschnitt der besten Orders ab (' + NF0.format(r.dev) + ' %) – mögliche Lock- oder Dump-Order');
   if (r.perHour < 5) r.risk.push('Sehr wenig Volumen – Orders füllen sich nur langsam');
   if (r.marginPct > 100) r.risk.push('Extreme Marge – oft Manipulation oder kaum Handel');
+  const t = trendCache[r.id];
+  r.d1h = t ? t.d1h : null; r.d24h = t ? t.d24h : null;
 }
 /* „Gefragt" = auf beiden Seiten viel Handel, damit sich Buy-Orders UND Sell-Offers schnell füllen */
 function liquid(r){
@@ -370,8 +374,8 @@ function matchSearch(r){
   const q = S.search.toLowerCase();
   return r.name.toLowerCase().includes(q) || r.id.toLowerCase().includes(q);
 }
-// Preis hat sich in der letzten Stunde nicht stärker bewegt als erlaubt (ohne Verlauf: ok)
-function stable(r){ return S.set.maxMove >= 1000 || r.d1h == null || Math.abs(r.d1h) <= S.set.maxMove; }
+// Oberster Preis liegt nah genug am Durchschnitt der besten Orders
+function stable(r){ return !!r && (S.set.maxDev >= 1000 || r.dev <= S.set.maxDev); }
 function filteredFlips(ignoreSearch){
   const s = S.set;
   return S.rows.filter(r =>
@@ -519,7 +523,27 @@ function banner(html){
   S.banner = html;
   const b = $('#banner'); if (b){ b.innerHTML = html; b.style.display = html ? 'block' : 'none'; }
 }
+/* Einstellungen per Link teilen: #bazaar/overview~<kodierte Werte> */
+const SHARE_KEYS = ['budget','share','tax','preset','minVolH','minTurnH','minBalance','minPct','maxPct','maxDev','minProfit','hideRisky','craftBuy','craftSell','craftMinPct','craftMinProfit'];
+function shareLink(){
+  const o = {}; for (const k of SHARE_KEYS) o[k] = S.set[k];
+  const code = btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  return location.origin + location.pathname + '#bazaar/overview~' + code;
+}
+function takeSharedSettings(){
+  const i = location.hash.indexOf('~'); if (i < 0) return false;
+  const code = location.hash.slice(i + 1);
+  history.replaceState(null, '', location.hash.slice(0, i));
+  try{
+    const o = JSON.parse(decodeURIComponent(escape(atob(code.replace(/-/g, '+').replace(/_/g, '/')))));
+    for (const k of SHARE_KEYS) if (k in o && typeof o[k] === typeof DEFAULTS[k]) S.set[k] = o[k];
+    save('settings', S.set);
+    setTimeout(() => toast('<b>Einstellungen übernommen</b><br>Du siehst jetzt dieselben Filter, dasselbe Budget und dieselbe Steuer wie die Person, die den Link geteilt hat.'), 300);
+    return true;
+  }catch(e){ return false; }
+}
 function route(){
+  if (takeSharedSettings() && S.rows.length) ingest(false);
   const [tool, tab, ...rest] = location.hash.replace('#', '').split('/');
   const prevTab = S.tab;
   if (TOOL[tool]){
@@ -562,7 +586,7 @@ function tick(){
   if (S.state === 'err') txt = 'Hypixel antwortet nicht';
   else if (!S.lastUpdated) txt = 'Lädt…';
   else if (S.paused){ txt = 'Pausiert'; state = 'pause'; }
-  else txt = 'Stand vor ' + ago(Date.now() - S.lastUpdated);
+  else txt = 'Datenstand ' + new Date(S.lastUpdated).toLocaleTimeString('de-AT') + ' (vor ' + ago(Date.now() - S.lastUpdated) + ')';
   dot.className = 'dot ' + state;
   st.textContent = txt;
 }
@@ -618,9 +642,8 @@ function paginate(tab, rows){
   return {slice: rows.slice(p*ps, p*ps + ps), html: pages > 1 ? `<div class="pager"><button class="btn ghost" data-pg="-1" ${p === 0 ? 'disabled' : ''}>Zurück</button><span>Seite ${p+1} von ${pages}</span><button class="btn ghost" data-pg="1" ${p >= pages-1 ? 'disabled' : ''}>Weiter</button></div>` : ''};
 }
 function bar(v, max){ return `<span class="pbar">${fmt(v)}<i style="width:${max > 0 ? Math.max(3, v / max * 100).toFixed(0) : 0}%"></i></span>`; }
-function spark(id, W=88, H=22, n=120){
-  const h = S.hist[id]; if (!h || h.t.length < 2) return '<span class="mut">–</span>';
-  const vals = h.s.slice(-n).filter(v => v > 0);
+function spark(id, W=88, H=22){
+  const t = trendCache[id], vals = t && t.spark ? t.spark.filter(v => v > 0) : [];
   if (vals.length < 2) return '<span class="mut">–</span>';
   const mn = Math.min(...vals), mx = Math.max(...vals);
   const pts = vals.map((v, i) => (i/(vals.length-1)*W).toFixed(1) + ',' + (mx === mn ? H/2 : H - 2 - (v-mn)/(mx-mn)*(H-4)).toFixed(1)).join(' ');
@@ -707,7 +730,7 @@ function renderDrawer(){
   } else if (kind !== 'market'){
     secs.push(`<section><h3>Gewinn</h3>${sliderCtl('minPct')}${coinCtl('minProfit', 'Mindestgewinn pro Stück')}${sliderCtl('maxPct')}</section>`);
   }
-  if (kind !== 'market') secs.push(`<section><h3>Sicherheit</h3>${sliderCtl('maxMove')}${switchCtl('hideRisky', 'Items mit Warnhinweis ausblenden', 'Preisausreißer, mögliche Manipulation, kaum Handel')}</section>`);
+  if (kind !== 'market') secs.push(`<section><h3>Sicherheit</h3>${sliderCtl('maxDev')}${switchCtl('hideRisky', 'Items mit Warnhinweis ausblenden', 'Preisausreißer, mögliche Manipulation, kaum Handel')}</section>`);
   $('#drawer').innerHTML = `<header><h2>Filter</h2><button class="btn ghost" data-act="closedrawer" aria-label="Filter schließen">Schließen</button></header>
     <div class="dbody">${secs.join('')}</div>
     <footer><button class="btn ghost" data-preset="balanced">Auf Ausgewogen zurücksetzen</button><button class="btn primary" data-act="closedrawer">Fertig</button></footer>`;
@@ -756,23 +779,24 @@ const PAGES = {
     const flips = filteredFlips(true).sort((a,b) => b.pph - a.pph);
     const crafts = filteredCrafts(true).sort((a,b) => b.pph - a.pph);
     const liq = S.rows.filter(liquid);
-    const movers = liq.filter(r => r.d1h != null).sort((a,b) => Math.abs(b.d1h) - Math.abs(a.d1h)).slice(0, 5);
+    const busiest = S.rows.filter(r => r.topBuy && r.topSell).sort((a,b) => b.turnH - a.turnH).slice(0, 5);
+    wantTrend(S.watch.slice(0, 5));
     const has = S.rows.length > 0;
     const list = (rows, emptyTxt) => rows.length ? `<ul class="rank">${rows.join('')}</ul>` : `<p class="muted-note">${emptyTxt}</p>`;
     const row = (attr, id, name, sub, val, valSub, valCls) => `<li ${attr}>${itemCell(id, name, sub)}<span class="v ${valCls || ''}">${val}<small>${valSub}</small></span></li>`;
     return `
       <h1 class="lead small">${leadSentence(bestNow())}</h1>
       <div class="stratbar"><span class="lbl">Strategie</span>${presetSeg()}<span class="note">${PRESETS[S.set.preset] ? esc(PRESETS[S.set.preset].desc) : 'Eigene Filtereinstellungen.'}</span></div>
-      <p class="summary">${has ? `${NF0.format(liq.length)} von ${NF0.format(S.rows.length)} Bazaar-Produkten werden gerade genug gehandelt. Dein Budget: ${words(S.set.budget)} Coins.` : ''} <button class="link" data-act="filters">Alle Filter</button></p>
+      <p class="summary">${has ? `${NF0.format(liq.length)} von ${NF0.format(S.rows.length)} Bazaar-Produkten werden gerade genug gehandelt. Dein Budget: ${words(S.set.budget)} Coins.` : ''} <button class="link" data-act="filters">Alle Filter</button> oder <button class="link" data-act="sharelink">Link mit meinen Einstellungen kopieren</button></p>
       <div class="cols">
         <section><header><h2>Beste Flips</h2>${flips.length ? `<button class="link" data-tab="flips">Alle ${flips.length} ansehen</button>` : ''}</header>
           ${list(flips.slice(0, 5).map(r => row(`data-open="${esc(r.id)}"`, r.id, r.name, `${price(r.buyAt)} kaufen, ${price(r.sellAt)} verkaufen`, fmt(r.pph), 'pro Stunde')), has ? 'Kein Flip passt zu deinen Filtern.' : 'Wird geladen …')}</section>
         <section><header><h2>Beste Craft-Flips</h2>${crafts.length ? `<button class="link" data-tab="crafts">Alle ${crafts.length} ansehen</button>` : ''}</header>
           ${list(crafts.slice(0, 5).map(c => row(`data-craft="${c.ri}"`, c.id, (c.cnt > 1 ? c.cnt + '× ' : '') + c.name, esc(c.ingredients), fmt(c.pph), 'pro Stunde')), has ? 'Kein Craft-Flip passt zu deinen Filtern.' : 'Wird geladen …')}</section>
-        <section><header><h2>Größte Preisbewegungen</h2><button class="link" data-tab="market">Zum Markt</button></header>
-          ${list(movers.map(r => row(`data-open="${esc(r.id)}"`, r.id, r.name, 'Instabuy ' + price(r.topSell), pct(r.d1h), 'letzte Stunde', cls(r.d1h))), has ? 'Die Seite sammelt noch Verlauf. Nach ein paar Minuten stehen hier die stärksten Bewegungen der letzten Stunde.' : 'Wird geladen …')}</section>
+        <section><header><h2>Am meisten gehandelt</h2><button class="link" data-tab="market">Zum Markt</button></header>
+          ${list(busiest.map(r => row(`data-open="${esc(r.id)}"`, r.id, r.name, `${price(r.topSell)} / ${price(r.topBuy)}`, fmt(r.turnH), 'Coins pro Stunde')), 'Wird geladen …')}</section>
         <section><header><h2>Deine Watchlist</h2>${S.watch.length ? '<button class="link" data-tab="watch">Bearbeiten</button>' : ''}</header>
-          ${list(S.watch.filter(id => S.byId[id]).slice(0, 5).map(id => { const r = S.byId[id]; return row(`data-open="${esc(id)}"`, id, r.name, `${price(r.topSell)} / ${price(r.topBuy)}`, pct(r.d1h), 'letzte Stunde', cls(r.d1h)); }), 'Noch leer. Markier ein Item mit ☆, dann taucht es hier auf.')}</section>
+          ${list(S.watch.filter(id => S.byId[id]).slice(0, 5).map(id => { const r = S.byId[id]; return row(`data-open="${esc(id)}"`, id, r.name, `${price(r.topSell)} / ${price(r.topBuy)}`, pct(r.d1h), r.d1h != null ? 'letzte Stunde' : (trendCache[id] ? 'kein Trend verfügbar' : 'Trend lädt'), cls(r.d1h)); }), 'Noch leer. Markier ein Item mit ☆, dann taucht es hier auf.')}</section>
       </div>`;
   },
 
@@ -785,8 +809,7 @@ const PAGES = {
       ${th('flips','sellAt','Sell-Offer','', 'Niedrigste Sell-Offer − 0,1')}
       ${th('flips','profit','Gewinn pro Stück','', 'Nach ' + NF2.format(S.set.tax) + ' % Bazaar-Steuer')}
       ${th('flips','perHour','Handel pro Stunde','', 'Stück pro Stunde auf der schwächeren Seite')}
-      ${th('flips','pph','Profit pro Stunde','', 'Geschätzt aus dem Wochenvolumen und deinem Anteil')}
-      ${th('flips','d1h','1 h')}</tr>`;
+      ${th('flips','pph','Profit pro Stunde','', 'Geschätzt aus dem Wochenvolumen und deinem Anteil')}</tr>`;
     const body = slice.map(r => `<tr data-open="${esc(r.id)}">
       <td class="c-star">${starBtn(r.id)}</td>
       <td class="l">${itemCell(r.id, r.name, '', r.risk)}</td>
@@ -794,9 +817,8 @@ const PAGES = {
       <td class="sell ${flash(r.id+'s', r.sellAt)}">${price(r.sellAt)}</td>
       <td>${price(r.profit)}<small>${pct(r.marginPct, false)}</small></td>
       <td>${fmt(r.perHour)}</td>
-      <td>${bar(r.pph, max)}<small>bei ${fmt(r.qty)} Stück</small></td>
-      <td class="${cls(r.d1h)}">${pct(r.d1h)}</td></tr>`).join('');
-    return toolbar('flips', rows.length, rows.length === 1 ? 'Flip' : 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(8, 'Kein Flip passt.', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table></div>${html}
+      <td>${bar(r.pph, max)}<small>bei ${fmt(r.qty)} Stück</small></td></tr>`).join('');
+    return toolbar('flips', rows.length, rows.length === 1 ? 'Flip' : 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Kein Flip passt.', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table></div>${html}
       <p class="hint">Setz eine Buy-Order zum grünen Preis. Sobald sie gefüllt ist, stellst du eine Sell-Offer zum Preis daneben ein. Klick auf eine Zeile für Verlauf und Orderbuch.</p>`;
   },
 
@@ -849,21 +871,22 @@ const PAGES = {
     const head = `<tr>${th('', '', '', 1)}${th('market','name','Item',1)}
       ${th('market','topSell','Instabuy','', 'Niedrigste Sell-Offer – das zahlst du beim Sofortkauf')}
       ${th('market','topBuy','Instasell','', 'Höchste Buy-Order – das bekommst du beim Sofortverkauf')}
-      ${th('market','spreadPct','Spread')}${th('market','d1h','1 h')}${th('market','d24h','24 h')}
-      ${th('market','wVol','Volumen pro Woche')}${th('', '', 'Verlauf')}</tr>`;
+      ${th('market','spreadPct','Spread')}
+      ${th('market','turnH','Umsatz pro Stunde','', 'Coins, die pro Stunde auf der schwächeren Seite umgesetzt werden')}
+      ${th('market','wVol','Volumen pro Woche')}</tr>`;
     const body = slice.map(r => `<tr data-open="${esc(r.id)}">
       <td class="c-star">${starBtn(r.id)}</td>
       <td class="l">${itemCell(r.id, r.name, '', r.risk)}</td>
       <td class="${flash(r.id+'S', r.topSell)}">${price(r.topSell)}</td>
       <td class="${flash(r.id+'B', r.topBuy)}">${price(r.topBuy)}</td>
       <td class="mut">${pct(r.spreadPct, false)}</td>
-      <td class="${cls(r.d1h)}">${pct(r.d1h)}</td><td class="${cls(r.d24h)}">${pct(r.d24h)}</td>
-      <td>${fmt(r.wVol)}</td>
-      <td>${spark(r.id)}</td></tr>`).join('');
-    return toolbar('market', rows.length, 'Produkte') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(9, 'Nichts gefunden.', '')}</tbody></table></div>${html}`;
+      <td>${fmt(r.turnH)}</td>
+      <td>${fmt(r.wVol)}</td></tr>`).join('');
+    return toolbar('market', rows.length, 'Produkte') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Nichts gefunden.', '')}</tbody></table></div>${html}`;
   },
 
   watch(){
+    wantTrend(S.watch);
     const rows = S.watch.map(id => {
       const r = S.byId[id], n = S.alerts.filter(a => a.id === id).length;
       if (!r) return `<tr><td class="c-star">${starBtn(id)}</td><td class="l">${itemCell(id, pretty(id), S.rows.length ? 'Gerade nicht im Bazaar' : 'Wird geladen …')}</td><td colspan="6"></td></tr>`;
@@ -873,7 +896,7 @@ const PAGES = {
         <td class="${flash(id+'S', r.topSell)}">${price(r.topSell)}</td><td class="${flash(id+'B', r.topBuy)}">${price(r.topBuy)}</td>
         <td class="${cls(r.profit)}">${price(r.profit)}</td>
         <td class="${cls(r.d1h)}">${pct(r.d1h)}</td><td class="${cls(r.d24h)}">${pct(r.d24h)}</td>
-        <td>${spark(id, 120, 24, 180)}</td></tr>`;
+        <td>${spark(id, 120, 24)}</td></tr>`;
     }).join('');
     const al = S.alerts.map((a, i) => {
       const r = S.byId[a.id], c = CONDS[a.cond];
@@ -882,7 +905,7 @@ const PAGES = {
         <td><button class="btn ghost danger" data-delalert="${i}">Löschen</button></td></tr>`;
     }).join('');
     return `<h2 class="sec">Watchlist</h2>
-      <div class="tablewrap"><table><thead><tr><th class="nosort"></th><th class="l nosort">Item</th><th class="nosort">Instabuy</th><th class="nosort">Instasell</th><th class="nosort">Flip-Gewinn</th><th class="nosort">1 h</th><th class="nosort">24 h</th><th class="nosort">Verlauf</th></tr></thead>
+      <div class="tablewrap"><table><thead><tr><th class="nosort"></th><th class="l nosort">Item</th><th class="nosort">Instabuy</th><th class="nosort">Instasell</th><th class="nosort">Flip-Gewinn</th><th class="nosort" title="Laut SkyCofl">1 h</th><th class="nosort" title="Laut SkyCofl">24 h</th><th class="nosort">24 h Verlauf</th></tr></thead>
       <tbody>${rows || emptyRow(8, 'Noch leer.', 'Klick bei einem Item auf ☆, um es hier zu verfolgen.')}</tbody></table></div>
       <h2 class="sec">Preisalarme</h2>
       <div class="tablewrap"><table><thead><tr><th class="l nosort">Item</th><th class="l nosort">Bedingung</th><th class="nosort">Aktuell</th><th class="l nosort">Status</th><th class="nosort"></th></tr></thead>
@@ -894,6 +917,7 @@ const PAGES = {
     const notifTxt = {granted:'Desktop-Benachrichtigungen sind erlaubt.', denied:'Desktop-Benachrichtigungen sind im Browser blockiert.', default:'Desktop-Benachrichtigungen sind noch nicht erlaubt.', unsupported:'Dein Browser unterstützt keine Desktop-Benachrichtigungen.'}[notif];
     const row = (title, desc, ctl) => `<div class="setrow"><div><h3>${title}</h3>${desc ? `<p>${desc}</p>` : ''}</div><div>${ctl}</div></div>`;
     return `<div class="settings">
+      ${row('Einstellungen teilen', 'Wenn ihr zu zweit flippt: Mit diesem Link sieht die andere Person exakt deine Filter, dein Budget und deine Steuer – und damit dieselben Zahlen.', '<div class="btnrow"><button class="btn" data-act="sharelink">Link kopieren</button></div>')}
       ${row('Darstellung', 'Mit „Wie System“ folgt die Seite der Hell/Dunkel-Einstellung deines Geräts.', segCtl('theme', [['light','Hell'],['dark','Dunkel'],['system','Wie System']]))}
       ${row('Budget', 'Wie viele Coins du für Flips einsetzen willst.', coinCtl('budget', 'Budget', [1e6, 5e6, 10e6, 50e6, 100e6, 500e6], 'Kurzschreibweise geht: 10m, 2,5m, 500k, 1b'))}
       ${row('Bazaar-Steuer', 'Standard sind 1,25 %. Mit dem Community-Shop-Upgrade „Bazaar Flipper“ zahlst du weniger.', segCtl('tax', [[1.25,'1,25 %'],[1.125,'1,125 %'],[1,'1 %']]))}
@@ -911,7 +935,7 @@ const PAGES = {
 /* =========================================================
    Detailansicht Item
    ========================================================= */
-function openDetail(id){ closeDrawer(); S.craftDetail = null; S.detail = id; $('#modal').classList.add('on'); renderDetail(false); }
+function openDetail(id){ closeDrawer(); wantTrend([id]); S.craftDetail = null; S.detail = id; $('#modal').classList.add('on'); renderDetail(false); }
 function closeDetail(){ S.detail = null; S.craftDetail = null; if (S.mchart){ S.mchart.destroy(); S.mchart = null; } const m = $('#modal'); if (m) m.classList.remove('on'); }
 function book(arr, side){
   const top = (arr || []).slice(0, 12);
@@ -1028,6 +1052,33 @@ function savePrefs(){ save('chartPrefs', chartPrefs); }
 const histCache = {};
 function rangeSeg(attr, cur, keys){ return `<div class="seg">${keys.map(k => `<button data-${attr}="${k}" class="${cur === k ? 'on' : ''}">${RANGES[k].label}</button>`).join('')}</div>`; }
 
+/* Trend (1 h / 24 h) aus dem SkyCofl-Tagesverlauf – für alle Nutzer gleich.
+   Wird nur für Watchlist, Detailfenster und Analyse-Seite geladen (wenige Items, Cache 10 min). */
+const trendCache = {}, trendQueue = [];
+let trendBusy = false;
+function wantTrend(ids){
+  const now = Date.now();
+  for (const id of ids){
+    const t = trendCache[id];
+    if ((!t || now - t.at > 600e3) && !trendQueue.includes(id)) trendQueue.push(id);
+  }
+  pumpTrends();
+}
+async function pumpTrends(){
+  if (trendBusy || !trendQueue.length) return;
+  trendBusy = true;
+  const id = trendQueue.shift();
+  const res = await loadHistory(id, '24h');
+  if (res.source === 'cofl' && res.data.t.length > 1){
+    const d = res.data, n = d.t.length, last = d.hi[n - 1];
+    let i1 = n - 1; while (i1 > 0 && d.t[i1] > d.t[n - 1] - HOUR) i1--;
+    const first = d.hi.find(v => v != null), h1 = d.hi[i1];
+    trendCache[id] = {at: Date.now(), d1h: h1 && last ? (last - h1) / h1 * 100 : null, d24h: first && last ? (last - first) / first * 100 : null, spark: d.hi.slice(-96)};
+  } else trendCache[id] = {at: Date.now(), d1h: null, d24h: null, spark: null, failed: true};
+  const r = S.byId[id]; if (r){ r.d1h = trendCache[id].d1h; r.d24h = trendCache[id].d24h; }
+  trendBusy = false;
+  if (!trendQueue.length) renderMain(); else setTimeout(pumpTrends, 700);
+}
 function localSeries(id, span){
   const h = S.hist[id], d = {t: [], hi: [], lo: [], vb: [], vs: []};
   if (!h) return d;
@@ -1365,6 +1416,7 @@ function refreshCalc(full){
   const sn = $('#cSellNote'); if (sn) sn.textContent = `Ø ${price(c.sellPx)} pro Stück über die höchsten Buy-Orders.`;
 }
 function initAnalysis(){
+  wantTrend([S.itemId]);
   const el = $('#achart'); if (!el) return;
   if (S.achart) S.achart.destroy();
   const ch = S.achart = new PriceChart(el, {tools: true});
@@ -1517,6 +1569,10 @@ document.addEventListener('click', e => {
   e.preventDefault();
   if (act === 'close') closeDetail();
   else if (act === 'filters') openDrawer();
+  else if (act === 'sharelink'){
+    const url = shareLink(), orig = el.textContent, done = () => { el.textContent = 'Link kopiert'; setTimeout(() => el.textContent = orig, 1800); };
+    (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject()).then(done).catch(() => { const ta = document.createElement('textarea'); ta.value = url; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); done(); }catch{} ta.remove(); });
+  }
   else if (act === 'back'){ nav(S.tool + '/' + (S.returnTo && S.returnTo !== 'item' ? S.returnTo : 'overview')); }
   else if (act === 'undo'){ if (S.achart) S.achart.undo(); }
   else if (act === 'cleardraw'){ if (S.achart){ if (el.dataset.sure){ S.achart.clearDrawings(); el.textContent = 'Alle Zeichnungen löschen'; delete el.dataset.sure; } else { el.dataset.sure = 1; el.textContent = 'Wirklich alle löschen?'; } } }
