@@ -111,5 +111,25 @@ r = node("const n=Date.UTC(2026,10,19,12); return E.sbUpcoming(n,10);")
 check('upcoming sorted', 1.0, 1.0 if all(r[i]['start'] <= r[i+1]['start'] for i in range(len(r)-1)) else 0.0)
 check('upcoming future', 1.0, 1.0 if all((x['end'] if x['end'] != x['start'] else x['start']) > ms(2026, 11, 19, 12) for x in r) else 0.0)
 
+# Marktpreis und Ausreißer-Filter
+r = node("""return [E.bazaarPrice({buy:1795.1,sell:1272.2,buyMovingWeek:4909613,sellMovingWeek:23487610}), E.bazaarPrice({buy:null,sell:99}), E.bazaarPrice({buy:10,sell:8}),
+  E.hampel([100,101,99,100,150,100,101,99,100]), E.hampel([100,101,102,103,104,105,106,107]), E.hampel([100,100,100,100,100.3,100,100])];""")
+check('vwap', (4909613*1795.1+23487610*1272.2)/(4909613+23487610), r[0]); check('one side', 99.0, r[1]); check('no volume -> mid', 9.0, r[2])
+check('hampel spike', 100.0, r[3][4]); check('hampel keeps rest', 101.0, r[3][1])
+check('hampel keeps trend', 1.0, 1.0 if r[4] == [100,101,102,103,104,105,106,107] else 0.0); check('hampel floor keeps tiny noise', 100.3, r[5][4])
+def hampel_ref(v, k=3, t=3, floor=.005):
+    out = list(v)
+    for i in range(len(v)):
+        w = [v[j] for j in range(max(0, i-k), min(len(v), i+k+1))]
+        if len(w) < k+1: continue
+        m = float(np.median(w)); mad = 1.4826*float(np.median([abs(x-m) for x in w]))
+        if abs(v[i]-m) > t*max(mad, floor*abs(m)): out[i] = m
+    return out
+for trial in range(10):
+    v = [float(x) for x in 100*np.exp(np.cumsum(rng.normal(0, .02, 120)))]
+    for _ in range(5): v[int(rng.integers(0, 120))] *= float(rng.choice([1.5, .6, 3]))
+    r = node(f"return E.hampel({json.dumps(v)});"); ref = hampel_ref(v)
+    for i in range(120): check(f'hampel {trial}/{i}', ref[i], r[i])
+
 print(f"geprüft: {checks}, Fehler: {len(fails)}")
 for f in fails: print('  ', f)

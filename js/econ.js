@@ -118,6 +118,28 @@ E.daily = function(points, {days, end, maxGap = 3} = {}){
   }
   return {t, v};
 };
+/* Bazaar-Tagespunkt von SkyCofl -> ein Marktpreis: mengengewichteter Durchschnitt aus Instabuy-Preis
+   (gewichtet mit den Instabuys der Woche) und Instasell-Preis (gewichtet mit den Instasells).
+   So zählt jede Seite so stark, wie wirklich zu ihrem Preis gehandelt wird. */
+E.bazaarPrice = function(o){
+  const b = +o.buy || 0, s = +o.sell || 0, wb = +o.buyMovingWeek || 0, ws = +o.sellMovingWeek || 0;
+  if (b > 0 && s > 0){ if (wb + ws > 0) return (wb * b + ws * s) / (wb + ws); return (b + s) / 2; }
+  return b > 0 ? b : s > 0 ? s : null;
+};
+/* Ausreißer-Filter (Hampel): ein Wert, der mehr als t robuste Standardabweichungen vom Median
+   seiner Nachbarn (±k) abweicht, wird durch diesen Median ersetzt. Entfernt einzelne Preisspitzen
+   (z. B. wenn für Minuten keine Sell-Offers da sind), lässt echte Trendwechsel stehen. */
+E.hampel = function(v, k = 3, t = 3, floor = .005){
+  const out = v.slice(), n = v.length;
+  for (let i = 0; i < n; i++){
+    if (!num(v[i])) continue;
+    const w = []; for (let j = Math.max(0, i - k); j <= Math.min(n - 1, i + k); j++) if (num(v[j])) w.push(v[j]);
+    if (w.length < k + 1) continue;
+    const m = E.median(w), mad = 1.4826 * E.median(w.map(x => Math.abs(x - m)));
+    if (Math.abs(v[i] - m) > t * Math.max(mad, floor * Math.abs(m))) out[i] = m;
+  }
+  return out;
+};
 E.lastIdx = v => { for (let i = v.length - 1; i >= 0; i--) if (num(v[i])) return i; return -1; };
 // Veränderung über k Tage (bezogen auf den letzten vorhandenen Tag)
 E.change = function(v, k){
@@ -205,13 +227,13 @@ E.groupBy = function(rows, key, val){
 /* ---------- Elastizität ----------
    Wochen-Stichproben (nicht überlappend): Menge = gehandelte Stück in der Woche,
    Preis = Ø-Preis der Woche. Ergebnis: Steigung von ln(Menge) über ln(Preis). */
-E.weeklySamples = function(points, qKey, pKey){
+E.weeklySamples = function(points, qKey, pKey, mode = 'last'){   // mode 'last' = laufende Wochensumme (Bazaar), 'sum' = Tageswerte aufsummieren (Auktionshaus)
   const pts = points.filter(p => num(p.t) && num(p[qKey]) && p[qKey] > 0 && num(p[pKey]) && p[pKey] > 0).sort((a, b) => a.t - b.t);
   if (pts.length < 2) return [];
   const out = []; let end = pts[pts.length - 1].t;
   while (end - 7 * DAY >= pts[0].t - DAY){
     const w = pts.filter(p => p.t > end - 7 * DAY && p.t <= end);
-    if (w.length){ const last = w[w.length - 1]; out.push({t: end, p: E.mean(w.map(p => p[pKey])), q: last[qKey]}); }
+    if (w.length >= (mode === 'sum' ? 4 : 1)){ const last = w[w.length - 1]; out.push({t: end, p: E.mean(w.map(p => p[pKey])), q: mode === 'sum' ? w.reduce((s, p) => s + p[qKey], 0) : last[qKey]}); }
     end -= 7 * DAY;
   }
   return out.reverse();

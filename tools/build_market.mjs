@@ -16,7 +16,9 @@ const H = 'https://api.hypixel.net/v2/', C = 'https://sky.coflnet.com/api/';
 const UA = {'User-Agent': 'SkyBlockHub-Marktanalyse (github.com/Kaiserlingo/Skyblock-Tools)'};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const DAYS = 366;              // ein Jahr + heute
-const LIQUID = 5e6;            // Coins Umsatz pro Tag, ab dem ein Item in Ranglisten und Indizes zählt
+const LIQUID = 5e6;            // Coins Umsatz pro Tag, ab dem ein Item in Ranglisten zählt
+const INDEX_MIN = 2e7;         // … und ab dem es in die Preisindizes kommt
+const MIN_WEEK = 700;          // mindestens so viele Instabuys UND Instasells pro Woche (100 pro Tag)
 const r4 = x => x == null || !isFinite(x) ? null : Math.round(x * 1e4) / 1e4;
 const sig = x => x == null || !isFinite(x) ? null : +x.toPrecision(5);
 
@@ -92,7 +94,9 @@ const newsList = (news.items || []).map(n => ({title: n.title, link: n.link, dat
 let ids = Object.keys(P).filter(id => { const q = P[id].quick_status || {}; return (q.buyMovingWeek || 0) + (q.sellMovingWeek || 0) > 0; });
 ids.sort((a, b) => turnover(b) - turnover(a));
 if (isFinite(LIMIT)) ids = ids.slice(0, LIMIT);
-function turnover(id){ const q = P[id].quick_status || {}; return ((q.buyMovingWeek || 0) * (q.buyPrice || 0) + (q.sellMovingWeek || 0) * (q.sellPrice || 0)) / 7; }
+// Umsatz pro Tag, vorsichtig gerechnet: beide Seiten mit dem Instasell-Preis (der Instabuy-Preis kann bei leerem Angebot absurd hoch stehen)
+function turnover(id){ const q = P[id].quick_status || {}; return ((q.buyMovingWeek || 0) + (q.sellMovingWeek || 0)) * (q.sellPrice || q.buyPrice || 0) / 7; }
+function tradedBoth(id){ const q = P[id].quick_status || {}; return (q.buyMovingWeek || 0) >= MIN_WEEK && (q.sellMovingWeek || 0) >= MIN_WEEK && q.sellPrice > 0 && q.buyPrice > 0 && q.buyPrice / q.sellPrice <= 1.5; }
 console.log(`Lade Verläufe für ${ids.length} Items …`);
 const from = new Date(today - DAYS * DAY).toISOString(), to = new Date(now).toISOString();
 const hist = await pool(ids, 4, id => get(C + `bazaar/${encodeURIComponent(id)}/history?start=${from}&end=${to}`));
@@ -100,20 +104,23 @@ const hist = await pool(ids, 4, id => get(C + `bazaar/${encodeURIComponent(id)}/
 const series = {};
 ids.forEach((id, k) => {
   const h = hist[k]; if (!Array.isArray(h) || !h.length) return;
-  const pts = h.map(o => {
-    const b = +o.buy || 0, s = +o.sell || 0;
-    return {t: E.parseUtc(o.timestamp), v: b > 0 && s > 0 ? (b + s) / 2 : (b || s), mw: (+o.buyMovingWeek || 0) + (+o.sellMovingWeek || 0)};
-  }).filter(p => isFinite(p.t));
-  const d = E.daily(pts, {days: DAYS, end: today});
-  const vol = E.daily(pts.map(p => ({t: p.t, v: p.mw})), {days: DAYS, end: today});
-  series[id] = {v: d.v, vol: vol.v, first: Math.min(...pts.map(p => p.t))};
+  const pts = h.map(o => ({t: E.parseUtc(o.timestamp), v: E.bazaarPrice(o), mw: (+o.buyMovingWeek || 0) + (+o.sellMovingWeek || 0)})).filter(p => isFinite(p.t));
+  if (pts.length) series[id] = {pts, last: Math.max(...pts.map(p => p.t)), first: Math.min(...pts.map(p => p.t))};
 });
-const T = Array.from({length: DAYS}, (_, i) => today - (DAYS - 1 - i) * DAY);
+// letzter Tag mit Daten: SkyCofl schreibt den Tagespunkt mit Verzögerung – nimm den Tag, den die meisten Items schon haben
+const lastDays = Object.values(series).map(s => E.dayStart(s.last)), END = E.median(lastDays.filter(d => d >= today - 3 * DAY)) ?? today;
+const T = Array.from({length: DAYS}, (_, i) => END - (DAYS - 1 - i) * DAY);
+for (const id in series){
+  const s = series[id];
+  s.v = E.hampel(E.daily(s.pts, {days: DAYS, end: END}).v);
+  s.vol = E.daily(s.pts.map(p => ({t: p.t, v: p.mw})), {days: DAYS, end: END}).v;
+  delete s.pts;
+}
 console.log(`Verläufe: ${Object.keys(series).length} von ${ids.length}`);
 
 /* ---------- Preisindizes ---------- */
 const cover = v => v.filter(x => x != null).length / v.length;
-const inIndex = ids.filter(id => series[id] && turnover(id) >= LIQUID && cover(series[id].v) >= .9 && series[id].v[0] != null);
+const inIndex = ids.filter(id => series[id] && turnover(id) >= INDEX_MIN && tradedBoth(id) && cover(series[id].v) >= .95 && series[id].v[0] != null);
 const spi = E.chainIndex(inIndex.map(id => ({v: series[id].v, w: turnover(id)})), DAYS);
 const secIdx = {};
 for (const s in SECTORS){
@@ -122,7 +129,7 @@ for (const s in SECTORS){
 }
 
 /* ---------- Wirkung von Updates (Patchnotes) ---------- */
-const liquidIds = ids.filter(id => series[id] && turnover(id) >= LIQUID);
+const liquidIds = ids.filter(id => series[id] && turnover(id) >= LIQUID && tradedBoth(id) && cover(series[id].v) >= .8);
 const updates = newsList.map(n => {
   const m = E.eventReturns(T, spi.v, n.date, [1, 3, 7, 14]);
   const sec = {}; for (const s in secIdx) sec[s] = r4(E.eventReturns(T, secIdx[s].v, n.date, [7]).d7);
@@ -161,7 +168,7 @@ for (const k in mayorFx){
 const items = {};
 for (const id of ids){
   const s = series[id], q = P[id].quick_status || {};
-  const o = {n: names[id] || null, s: sector(id), to: Math.round(turnover(id)), bp: sig(q.buyPrice), sp: sig(q.sellPrice), bw: q.buyMovingWeek || 0, sw: q.sellMovingWeek || 0};
+  const o = {n: names[id] || null, s: sector(id), to: Math.round(turnover(id)), liq: liquidIds.includes(id) ? 1 : 0, idx: inIndex.includes(id) ? 1 : 0, bp: sig(q.buyPrice), sp: sig(q.sellPrice), bw: q.buyMovingWeek || 0, sw: q.sellMovingWeek || 0};
   if (s){
     const L = E.lastIdx(s.v);
     Object.assign(o, {p: sig(L >= 0 ? s.v[L] : null), c1: r4(E.change(s.v, 1)), c7: r4(E.change(s.v, 7)), c30: r4(E.change(s.v, 30)), c90: r4(E.change(s.v, 90)), c365: r4(E.change(s.v, DAYS - 1)),
@@ -175,7 +182,7 @@ for (const id of ids){
 
 const cur = election.mayor || {};
 const out = {
-  v: 1, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID,
+  v: 2, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID, indexMin: INDEX_MIN, minWeek: MIN_WEEK,
   sources: {bazaar: bz.lastUpdated, history: 'SkyCofl (sky.coflnet.com)', news: 'Hypixel /skyblock/news', mayors: 'SkyCofl /api/mayor'},
   sectors: Object.fromEntries(Object.entries(SECTORS).map(([k, l]) => [k, {label: l, items: ids.filter(id => sector(id) === k).length, index: secIdx[k] ? secIdx[k].n : 0}])),
   index: {spi: spi.v.map(r4), n: spi.n, sec: Object.fromEntries(Object.entries(secIdx).map(([k, x]) => [k, x.v]))},
