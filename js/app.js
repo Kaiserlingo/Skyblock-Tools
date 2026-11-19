@@ -1133,7 +1133,7 @@ async function loadHistory(id, range){
     if (!r.ok) throw new Error(r.status === 429 ? 'zu viele Anfragen' : 'HTTP ' + r.status);
     const arr = await r.json();
     if (!Array.isArray(arr) || !arr.length) throw new Error('keine Daten');
-    const pts = arr.map(o => ({t: Date.parse(o.timestamp), a: +o.buy || 0, b: +o.sell || 0, ov: o.buyVolume, bv: o.sellVolume}))
+    const pts = arr.map(o => ({t: parseUtc(o.timestamp), a: +o.buy || 0, b: +o.sell || 0, ov: o.buyVolume, bv: o.sellVolume}))
       .filter(x => isFinite(x.t)).sort((x, y) => x.t - y.t);
     const d = {t: [], hi: [], lo: [], vb: [], vs: []};
     for (const x of pts){
@@ -1146,6 +1146,13 @@ async function loadHistory(id, range){
   }catch(e){
     return {data: localSeries(id, R.span), source: 'local', error: e.message};
   }
+}
+// SkyCofl liefert UTC-Zeiten ohne Zeitzone ("2026-11-19T08:03:28.982") – Date.parse würde sie als Ortszeit lesen
+// und den Verlauf in Österreich um 1 h (Sommer 2 h) verschieben.
+function parseUtc(ts){
+  if (typeof ts === 'number') return ts;
+  if (typeof ts !== 'string') return NaN;
+  return Date.parse(/(Z|[+-]\d\d:?\d\d)$/i.test(ts) ? ts : ts + 'Z');
 }
 function cloneSeries(d){ return {t: [...d.t], hi: [...d.hi], lo: [...d.lo], vb: [...d.vb], vs: [...d.vs]}; }
 // aktuellen Live-Preis an einen Chart anhängen

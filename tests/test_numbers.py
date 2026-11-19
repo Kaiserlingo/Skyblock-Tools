@@ -63,7 +63,7 @@ async def run(name, snap, items):
             # Konsistenz: Flip-Rechner mit Standardwerten = Profit pro Stunde der Tabelle
             if r['maxQty']>=1 and r['profit']>0:
                 js=await pg.evaluate(f"(()=>{{calcPrefs.mode='qty';calcPrefs.qty=S.byId[{json.dumps(pid)}].maxQty;calcState.buyPx=null;calcState.sellPx=null;const c=flipCalc(S.byId[{json.dumps(pid)}],'order','offer');return [c.pph,S.byId[{json.dumps(pid)}].pph]}})()")
-                if not close(js[0],js[1]): fails.append(f"[{name} Konsistenz {pid}] Rechner {js[0]} != Tabelle {js[1]}")
+                if not close(js[0] or 0, js[1] or 0): fails.append(f"[{name} Konsistenz {pid}] Rechner {js[0]} != Tabelle {js[1]}")
             # Budget-Modus
             for bm in ['order','insta']:
                 js=await pg.evaluate(f"(()=>{{calcPrefs.mode='budget';calcPrefs.budget=5e6;const c=flipCalc(S.byId[{json.dumps(pid)}],'{bm}','offer');return {{qty:c.qty,cost:c.cost}}}})()")
