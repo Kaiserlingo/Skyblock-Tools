@@ -400,7 +400,7 @@ function pageItem(){
     <div id="mi-head">${itemHead(id)}</div>
     <section class="mk-block">
       <header><h2>Preisverlauf</h2>
-        <div class="seg sm" role="group" aria-label="Zeitraum">${[['14d', '14 Tage'], ['1y', '1 Jahr'], ['all', 'Alles']].map(([k, l]) => `<button data-mirange="${k}" class="${K.itRange === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div class="seg sm" role="group" aria-label="Zeitraum">${[['7d', '7 Tage'], ['1y', '1 Jahr'], ['all', 'Alles']].map(([k, l]) => `<button data-mirange="${k}" class="${K.itRange === k ? 'on' : ''}">${l}</button>`).join('')}</div>
         <label class="chk"><input type="checkbox" data-miopt="bands" ${K.itBands ? 'checked' : ''}> Mayor-Amtszeiten</label>
         <label class="chk"><input type="checkbox" data-miopt="marks" ${K.itMarks ? 'checked' : ''}> Updates</label>
       </header>
@@ -429,19 +429,19 @@ async function mountItem(){
   await Promise.allSettled([loadMD(), loadHy(), loadCat(), K.liveP]);
   if (K.it !== I) return;
   const k = I.k = kind(id);
-  const now = Date.now(), y = new Date(now - 366 * DAY).toISOString(), n = new Date(now).toISOString();
+  const now = Date.now(), y = new Date((K.md ? K.md.days.from : now - 366 * DAY) - 2 * DAY).toISOString(), n = new Date(now).toISOString();   // ab dem ersten Tag des Rasters, wie die Pipeline
   const enc = encodeURIComponent(id);
   try{
     if (k.bz){
-      const [h1, h14] = await Promise.all([getJSON(COFL + `bazaar/${enc}/history?start=${y}&end=${n}`, 30 * 60e3), getJSON(COFL + `bazaar/${enc}/history?start=${new Date(now - 14 * DAY).toISOString()}&end=${n}`, 5 * 60e3).catch(() => null)]);
-      I.h1 = bzPoints(h1); I.h14 = bzPoints(h14);
+      const [h1, h14] = await Promise.all([getJSON(COFL + `bazaar/${enc}/history?start=${y}&end=${n}`, 30 * 60e3), getJSON(COFL + `bazaar/${enc}/history?start=${new Date(now - 7 * DAY).toISOString()}&end=${n}`, 5 * 60e3).catch(() => null)]);
+      I.h1 = bzPoints(h1); I.h7 = bzPoints(h14);
     } else if (k.ah){
       const [full, week, stats, cur, bins, sold] = await Promise.allSettled([
         getJSON(COFL + `item/price/${enc}/history/full`, 60 * 60e3), getJSON(COFL + `item/price/${enc}/history/week`, 10 * 60e3),
         getJSON(COFL + `item/price/${enc}`, 5 * 60e3), getJSON(COFL + `item/price/${enc}/current`, 60e3),
         getJSON(COFL + `auctions/tag/${enc}/active/bin`, 60e3), getJSON(COFL + `auctions/tag/${enc}/sold`, 5 * 60e3)]);
       const v = x => x.status === 'fulfilled' ? x.value : null;
-      I.hAll = ahPoints(v(full)); I.h1 = I.hAll.filter(p => p.t >= now - 366 * DAY); I.h14 = ahPoints(v(week));
+      I.hAll = ahPoints(v(full)); I.h1 = I.hAll.filter(p => p.t >= now - 366 * DAY); I.h7 = ahPoints(v(week));
       I.ah = {stats: v(stats), cur: v(cur), bins: Array.isArray(v(bins)) ? v(bins) : [], sold: soldStats(v(sold))};
     }
   }catch(e){ I.err.push(e.message); }
@@ -472,7 +472,7 @@ function soldStats(a){
 function feedItemChart(){
   const ch = K.chart, I = K.it; if (!ch || !I || !I.ready) return;
   const r = K.itRange, md = K.md;
-  let pts = r === '14d' ? I.h14 : r === 'all' ? I.hAll : I.h1;
+  let pts = r === '7d' ? I.h7 : r === 'all' ? I.hAll : I.h1;
   if (r === 'all' && !I.hAll && I.k.bz){
     ch.empty = 'Lädt …'; ch.setData({t: []});
     getJSON(COFL + `bazaar/${encodeURIComponent(I.id)}/history?start=2019-06-01T00:00:00Z&end=${new Date().toISOString()}`, 60 * 60e3)
@@ -523,7 +523,8 @@ function analyze(I){
   // Saisonalität (Ortszeit)
   const tz = new Date().getTimezoneOffset();
   A.wd = E.profile(A.T, A.v, 'weekday', 7, tz);
-  const h = I.h14 || []; A.hr = h.length > 48 ? E.profile(h.map(p => p.t), h.map(p => p.v), 'hour', 25, tz) : null;
+  const h = (I.h7 || []).filter(p => num(p.v));
+  if (h.length > 36){ const st = E.median(h.slice(1).map((p, i) => p.t - h[i].t)) / 36e5, win = 2 * Math.round(12 / Math.max(st, .25)) + 1; A.hr = E.profile(h.map(p => p.t), h.map(p => p.v), 'hour', win, tz); A.hrStep = st; } else A.hr = null;
   // Politik und Updates
   if (md){
     const done = md.terms.filter(t => t.end <= md.built && t.start >= A.T[0] + 6 * DAY);   // wie in der Pipeline
@@ -609,9 +610,10 @@ function curveSVG(b){
 }
 
 /* --- Elastizität --- */
-function elastText(e, what){
+function elastText(e, what, expectSign){
   if (!e) return `<p class="note">Zu wenige Wochen mit Daten für eine Schätzung der ${what}.</p>`;
-  const a = Math.abs(e.b), word = !e.sig ? 'kein sicher messbarer Zusammenhang' : a > 1 ? 'elastisch' : 'unelastisch';
+  const a = Math.abs(e.b), wrong = e.sig && Math.sign(e.b) !== expectSign;
+  const word = !e.sig ? 'kein sicher messbarer Zusammenhang' : wrong ? (expectSign < 0 ? 'Menge steigt mit dem Preis: Nachfrageschübe treiben den Preis, eine Elastizität lässt sich so nicht ablesen' : 'Menge fällt mit dem Preis: Angebotsschübe drücken den Preis, eine Elastizität lässt sich so nicht ablesen') : a > 1 ? 'elastisch' : 'unelastisch';
   return facts([[what, `${NF2.format(e.b)} <small>(${NF2.format(e.lo)} bis ${NF2.format(e.hi)})</small>`], ['Einordnung', word], ['Erklärte Streuung (R²)', NF2.format(e.r2)], ['Wochen', NF0.format(e.n)]]);
 }
 function elasticityHTML(I){
@@ -619,8 +621,8 @@ function elasticityHTML(I){
   return card('Preiselastizität', I.k.bz
     ? 'Nachfrage: Wie viele Instabuys gibt es weniger, wenn der Instabuy-Preis um 1 % steigt? Angebot: Wie viel mehr wird per Instasell verkauft, wenn der Preis um 1 % steigt? Die Schätzung zeigt einen Zusammenhang, keine Ursache: Auch Updates und Mayors verschieben beide Größen.'
     : 'Wie stark ändert sich die Zahl der Verkäufe pro Woche, wenn der günstigste Preis um 1 % steigt?',
-    elastText(A.eD, 'Nachfrageelastizität') + (I.k.bz ? elastText(A.eS, 'Angebotselastizität') : '')
-    + `<p class="note">Werte in Klammern: 95-%-Konfidenzintervall. Liegt die 0 darin, lässt sich kein Zusammenhang belegen.</p>`);
+    elastText(A.eD, 'Nachfrageelastizität', -1) + (I.k.bz ? elastText(A.eS, 'Angebotselastizität', 1) : '')
+    + `<p class="note">Werte in Klammern: 95-%-Konfidenzintervall. Liegt die 0 darin, lässt sich kein Zusammenhang belegen. Klassisch ist die Nachfrageelastizität negativ (teurer heißt weniger gekauft) und die Angebotselastizität positiv.</p>`);
 }
 
 /* --- Preiskorridor --- */
@@ -666,7 +668,7 @@ function structureHTML(I){
     return card('Marktstruktur und Wettbewerb', 'Viele kleine Orders auf vielen Preisstufen heißen: niemand bestimmt den Preis. Steht ein Großteil der Menge in einer einzigen Stufe, kann ein einzelner Spieler den Preis halten oder drücken.',
       facts([['Buy-Orders gesamt', NF0.format(q.sellOrders || 0)], ['Sell-Offers gesamt', NF0.format(q.buyOrders || 0)], ['Ø Größe Buy-Order (sichtbar)', b.d.avgOrder ? fmt(b.d.avgOrder) + ' Stück' : '–'], ['Ø Größe Sell-Offer (sichtbar)', b.s.avgOrder ? fmt(b.s.avgOrder) + ' Stück' : '–'],
         ['HHI Nachfrage', b.d.hhi != null ? `${NF2.format(b.d.hhi)} <small>${hhiWord(b.d.hhi)}</small>` : '–'], ['HHI Angebot', b.s.hhi != null ? `${NF2.format(b.s.hhi)} <small>${hhiWord(b.s.hhi)}</small>` : '–'],
-        ['Größte Stufe Nachfrage', b.d.topShare != null ? P(b.d.topShare, false) + ' der Menge' : '–'], ['Größte Stufe Angebot', b.s.topShare != null ? P(b.s.topShare, false) + ' der Menge' : '–']]));
+        ['Größte Preisstufe Nachfrage', b.d.topShare != null ? P(b.d.topShare, false) + ' der Menge' : '–'], ['Größte Preisstufe Angebot', b.s.topShare != null ? P(b.s.topShare, false) + ' der Menge' : '–']]));
   }
   const s = I.ah && I.ah.sold;
   return card('Marktstruktur und Wettbewerb', 'Kommen die Verkäufe von vielen verschiedenen Spielern, herrscht Wettbewerb. Verkauft fast nur einer, bestimmt er den Preis.',
@@ -686,7 +688,7 @@ function seasonHTML(I){
   const A = I.A, WD = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'], order = [1, 2, 3, 4, 5, 6, 0];
   const best = (prof, keys, lab) => { const e = keys.filter(k => prof && prof[k]).map(k => [k, prof[k].dev]); if (e.length < 3) return null; e.sort((a, b) => a[1] - b[1]); return {lo: lab(e[0][0]), loV: e[0][1], hi: lab(e[e.length - 1][0]), hiV: e[e.length - 1][1]}; };
   const w = best(A.wd, order, k => WD[k]), hrs = Array.from({length: 24}, (_, i) => i), h = A.hr ? best(A.hr, hrs, k => k + ' Uhr') : null;
-  return card('Saisonalität', 'Abweichung vom gleitenden Durchschnitt, nach Wochentag (aus einem Jahr) und Uhrzeit (aus 14 Tagen, deine Ortszeit). Unterschiede unter 1 % sind meist Zufall.',
+  return card('Saisonalität', 'Abweichung vom gleitenden Durchschnitt, nach Wochentag (aus einem Jahr) und Uhrzeit (aus 7 Tagen, deine Ortszeit). Unterschiede unter 1 % sind meist Zufall.',
     `<h4 class="mk-h4">Wochentag</h4>${barsSVG(A.wd, order, order.map(k => WD[k]))}${w ? `<p class="note">Am günstigsten im Schnitt ${w.lo} (${P(w.loV)}), am teuersten ${w.hi} (${P(w.hiV)}).</p>` : ''}
      ${A.hr ? `<h4 class="mk-h4">Uhrzeit</h4>${barsSVG(A.hr, hrs, hrs.map(String))}${h ? `<p class="note">Am günstigsten um ${h.lo} (${P(h.loV)}), am teuersten um ${h.hi} (${P(h.hiV)}).</p>` : ''}` : ''}`);
 }
@@ -825,6 +827,6 @@ document.addEventListener('keydown', e => {
   if (e.key === '/' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)){ const s = $('#msearch'); if (s){ e.preventDefault(); s.focus(); } }
 });
 
-window.Markt = {render, mount, update, leave, pageTitle, _K: K, _analyze: analyze};
+window.Markt = {render, mount, update, leave, pageTitle, _K: K, _analyze: analyze, _bzPoints: bzPoints, _ahPoints: ahPoints};
 if (S.tool === 'markt') renderMain(true);
 })();

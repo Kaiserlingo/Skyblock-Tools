@@ -271,7 +271,7 @@ E.book = function(product){
   const side = arr => {
     const tot = arr.reduce((s, l) => s + l.amount, 0), ords = arr.reduce((s, l) => s + (l.orders || 0), 0);
     const hhi = tot ? arr.reduce((s, l) => s + (l.amount / tot) ** 2, 0) : null;
-    return {levels: arr.length, amount: tot, orders: ords, avgOrder: ords ? tot / ords : null, hhi, topShare: tot && arr.length ? arr[0].amount / tot : null,
+    return {levels: arr.length, amount: tot, orders: ords, avgOrder: ords ? tot / ords : null, hhi, topShare: tot && arr.length ? Math.max(...arr.map(l => l.amount)) / tot : null,
             value: arr.reduce((s, l) => s + l.amount * l.pricePerUnit, 0)};
   };
   const bid = dem[0] ? dem[0].pricePerUnit : null, ask = sup[0] ? sup[0].pricePerUnit : null;
