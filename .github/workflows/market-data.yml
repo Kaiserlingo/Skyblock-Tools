@@ -1,0 +1,46 @@
+name: Marktdaten aktualisieren
+
+# Baut einmal am Tag market.json (Tagesdaten aller Bazaar-Items, Preisindizes,
+# Wirkung von Updates und Mayors) und legt sie auf den Branch "data".
+# Die Website lädt sie von dort. Unter "Actions" auch manuell startbar.
+on:
+  schedule:
+    - cron: "41 3 * * *"   # täglich 03:41 UTC
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Nur die N umsatzstärksten Items (leer = alle)"
+        required: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: market-data
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Marktdaten berechnen
+        run: |
+          mkdir -p out
+          if [ -n "${{ github.event.inputs.limit }}" ]; then
+            node tools/build_market.mjs out/market.json --limit "${{ github.event.inputs.limit }}"
+          else
+            node tools/build_market.mjs out/market.json
+          fi
+      - name: Auf Branch "data" veröffentlichen
+        run: |
+          cd out
+          git init -q
+          git checkout -q -b data
+          git add market.json
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Marktdaten $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
