@@ -23,13 +23,13 @@ const MARKT_TABS = [
 const lazy = name => (fn, fallback) => (...a) => window[name] && window[name][fn] ? window[name][fn](...a) : fallback;
 const M = lazy('Markt');
 const TOOLS = [
+  {id:'bazaar', title:'Bazaar Flipper',
+   desc:'Live-Flips mit Buy-Orders, Craft-Flips nur über den Bazaar, NPC-Flips, Marktübersicht und Preis-Alarme.',
+   tabs: BAZAAR_TABS, defaultTab:'overview'},
   {id:'markt', title:'Markt-Analyse',
    desc:'Jedes SkyBlock-Item volks- und betriebswirtschaftlich durchleuchtet: Preis, Angebot und Nachfrage, Elastizität, Kosten, Risiko. Dazu, wie Updates und Mayors den Markt bewegen.',
    tabs: MARKT_TABS, defaultTab:'start',
-   render: M('render', '<p class="loading">Wird geladen …</p>'), mount: M('mount'), update: M('update'), leave: M('leave'), pageTitle: M('pageTitle', 'Markt-Analyse')},
-  {id:'bazaar', title:'Bazaar Flipper', paused: true,
-   desc:'Live-Flips mit Buy-Orders, Craft-Flips nur über den Bazaar, NPC-Flips, Marktübersicht und Preis-Alarme.',
-   tabs: BAZAAR_TABS, defaultTab:'overview'},
+   render: M('render', '<p class="loading">Wird geladen …</p>'), mount: M('mount'), update: M('update'), leave: M('leave'), pageTitle: M('pageTitle', 'Markt-Analyse'), meta: M('hubMeta', '')},
 ];
 const TOOL = Object.fromEntries(TOOLS.map(t => [t.id, t]));
 
@@ -607,7 +607,7 @@ function statusEl(){ return `<span class="status" id="status"><i class="dot" id=
 function renderTop(){
   const t = S.tool && TOOL[S.tool];
   $('#top').innerHTML = `<div class="bar">
-      <a class="wordmark" href="#" data-nav="">SkyBlock Hub</a>
+      <a class="wordmark" href="#" data-nav="">SkyBlock Tools</a>
       ${t ? `<span class="sep">/</span><span class="toolname">${t.title}</span>` : ''}
       <div class="spacer"></div>
       ${statusEl()}
@@ -643,7 +643,7 @@ function renderMain(force){
   const tl = S.tool && TOOL[S.tool];
   if (tl && tl.render){
     if (!force && tl.update){ tl.update(); return; }
-    document.title = tl.pageTitle(S.tab) + ' – SkyBlock Hub';
+    document.title = tl.pageTitle(S.tab) + ' – SkyBlock Tools';
     $('#view').innerHTML = tl.render(S.tab);
     renderTabs(); if (tl.mount) tl.mount(S.tab);
     return;
@@ -651,7 +651,7 @@ function renderMain(force){
   if (!force && S.tool && S.tab === 'item' && S.achart && S.byId[S.itemId]){ updateAnalysis(); renderTabs(); return; }
   const wasSearch = a && a.id === 'search', pos = wasSearch ? a.selectionStart : 0;
   let html;
-  if (!S.tool){ html = pageHub(); document.title = 'SkyBlock Hub'; }
+  if (!S.tool){ html = pageHub(); document.title = 'SkyBlock Tools'; }
   else {
     const t = TOOL[S.tool], tab = t.tabs.find(x => x.id === S.tab);
     document.title = (S.tab === 'item' ? (S.byId[S.itemId] ? S.byId[S.itemId].name : pretty(S.itemId)) + ' – Analyse' : tab.label) + ' – ' + t.title;
@@ -805,14 +805,17 @@ function leadSentence(b){
   return `Gerade bringt ${esc(b.name)} am meisten: rund ${words(b.pph)} Coins pro Stunde${b.kind === 'craft' ? ' als Craft-Flip' : ''}.`;
 }
 function pageHub(){
+  const b = bestNow();
+  const n = S.rows.length ? filteredFlips(true).length + filteredCrafts(true).length : null;
   return `<section class="hub">
-    <p class="intro">Werkzeuge für Hypixel SkyBlock mit Live-Daten aus dem Spiel.</p>
-    <h1 class="lead">Was willst du dir ansehen?</h1>
+    <p class="intro">Werkzeuge für Hypixel SkyBlock. Die Preise kommen live aus dem Bazaar und werden alle ${S.set.interval} Sekunden neu geladen.</p>
+    <h1 class="lead">${leadSentence(b)}</h1>
+    <h2 class="hub-h">Werkzeuge</h2>
     <ul class="toollist">${TOOLS.map(t => `
-      <li class="${t.paused ? 'paused' : ''}"><a href="#${t.id}" data-nav="${t.id}">
-        <span class="t">${t.title}${t.paused ? '<span class="tag">pausiert</span>' : ''}</span>
+      <li><a href="#${t.id}" data-nav="${t.id}">
+        <span class="t">${t.title}</span>
         <span class="d">${t.desc}</span>
-        <span class="m">${t.paused ? 'Funktioniert weiter, wird aber gerade nicht weiterentwickelt.' : ''}</span>
+        <span class="m">${t.id === 'bazaar' && n != null ? `${NF0.format(n)} passende Flips` : t.meta ? t.meta() : ''}</span>
       </a></li>`).join('')}
     </ul>
     <p class="fine">Inoffizielles Fan-Projekt, nicht mit Hypixel oder Mojang verbunden. Deine Eingaben bleiben in deinem Browser.</p>

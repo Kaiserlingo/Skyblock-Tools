@@ -1,4 +1,4 @@
-# SkyBlock Hub
+# SkyBlock Tools
 
 Persönliche Tool-Sammlung für **Hypixel SkyBlock**
 
