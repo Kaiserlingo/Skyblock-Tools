@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: market-data
+  group: data-branch
   cancel-in-progress: false
 
 jobs:
@@ -37,10 +37,8 @@ jobs:
             node tools/build_market.mjs out/market.json
           fi
       - name: Auf Branch "data" veröffentlichen
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cd out
-          git init -q
-          git checkout -q -b data
-          git add market.json
-          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" commit -q -m "Marktdaten $(date -u +%Y-%m-%dT%H:%MZ)"
-          git push -q -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" data
+          tools/data_branch.sh fetch pub
+          tools/data_branch.sh publish pub out/market.json

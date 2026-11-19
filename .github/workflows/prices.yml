@@ -1,0 +1,33 @@
+name: Live-Preise (Auction House)
+
+# Liest alle 10 Minuten alle aktiven Auktionen von Hypixel und schreibt den Lowest BIN
+# jedes Items nach prices.json auf dem Branch "data". Die Website lädt sie von dort.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-branch
+  cancel-in-progress: false
+
+jobs:
+  prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Aktuellen Stand holen
+        run: tools/data_branch.sh fetch pub
+      - name: Auktionen auswerten
+        run: node tools/build_prices.mjs prices.json pub/prices.json
+      - name: Veröffentlichen
+        run: tools/data_branch.sh publish pub prices.json

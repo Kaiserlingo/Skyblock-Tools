@@ -11,13 +11,13 @@
 const CATS = {
   MINING: 'Mining', FARMING: 'Farming', COMBAT: 'Combat', FORAGING: 'Foraging', FISHING: 'Fishing',
   HUNTING: 'Hunting', SLAYER: 'Slayer', DUNGEONS: 'Dungeons', RIFT: 'Rift',
-  ENCHANTMENTS: 'Enchantments', ESSENCES: 'Essences', REFORGES: 'Reforge Stones', OTHER_RES: 'Oddities',
+  ENCHANTMENTS: 'Enchantments', ESSENCES: 'Essences', REFORGES: 'Reforge Stones', ODDITIES: 'Oddities',
   WEAPONS: 'Weapons', ARMOR: 'Armor', EQUIPMENT: 'Equipment', ACCESSORIES: 'Accessories', TOOLS: 'Tools',
-  PETS: 'Pets', COSMETICS: 'Cosmetics', RUNES: 'Runes', MISC: 'Miscellaneous',
+  PETS: 'Pets', COSMETICS: 'Cosmetics', RUNES: 'Runes',
 };
 // Reihenfolge in Listen und Auswahlfeldern
-const ORDER = ['MINING', 'FARMING', 'COMBAT', 'FORAGING', 'FISHING', 'HUNTING', 'SLAYER', 'DUNGEONS', 'RIFT', 'ENCHANTMENTS', 'ESSENCES', 'REFORGES', 'OTHER_RES',
-               'WEAPONS', 'ARMOR', 'EQUIPMENT', 'ACCESSORIES', 'TOOLS', 'PETS', 'COSMETICS', 'RUNES', 'MISC'];
+const ORDER = ['MINING', 'FARMING', 'COMBAT', 'FORAGING', 'FISHING', 'HUNTING', 'SLAYER', 'DUNGEONS', 'RIFT', 'ENCHANTMENTS', 'ESSENCES', 'REFORGES',
+               'WEAPONS', 'ARMOR', 'EQUIPMENT', 'ACCESSORIES', 'TOOLS', 'PETS', 'COSMETICS', 'RUNES', 'ODDITIES'];
 // Ausrüstung nach Hypixel-Kategorie
 const GEAR = {
   SWORD: 'WEAPONS', LONGSWORD: 'WEAPONS', BOW: 'WEAPONS', WAND: 'WEAPONS', GAUNTLET: 'WEAPONS', ARROW: 'WEAPONS', DEPLOYABLE: 'WEAPONS',
@@ -32,7 +32,10 @@ const GEAR = {
 // Slayer-Drops (die Ausgangsstoffe; was daraus gecraftet wird, folgt über die Rezepte)
 const SLAYER = ['REVENANT_FLESH', 'FOUL_FLESH', 'UNDEAD_CATALYST', 'REVENANT_VISCERA', 'TARANTULA_WEB', 'TARANTULA_SILK', 'TOXIC_ARROW_POISON', 'FLY_SWATTER',
   'WOLF_TOOTH', 'GOLDEN_TOOTH', 'GRIZZLY_BAIT', 'HAMSTER_WHEEL', 'NULL_SPHERE', 'NULL_OVOID', 'NULL_ATOM', 'TWILIGHT_ARROW_POISON', 'ENDERSNAKE_RUNE',
-  'DERELICT_ASHE', 'MOLTEN_POWDER', 'LUMINO_FIBER', 'KELVIN_INVERTER', 'WHIPPED_MAGMA_CREAM', 'COVEN_SEAL', 'UNFANGED_VAMPIRE_PART'];
+  'DERELICT_ASHE', 'MOLTEN_POWDER', 'LUMINO_FIBER', 'KELVIN_INVERTER', 'WHIPPED_MAGMA_CREAM', 'COVEN_SEAL', 'UNFANGED_VAMPIRE_PART',
+  'NULL_BLADE', 'NULL_EDGE', 'ENDERMAN_CORTEX_REWRITER', 'REVENANT_CATALYST', 'SPIDER_CATALYST', 'TARANTULA_CATALYST', 'WEAK_WOLF_CATALYST',
+  'CRUDE_GABAGOOL', 'VERY_CRUDE_GABAGOOL', 'HEAVY_GABAGOOL', 'FUEL_GABAGOOL', 'HYPERGOLIC_GABAGOOL', 'SULPHURIC_COAL', 'INFERNO_FUEL_BLOCK',
+  'BLAZE_ROD_DISTILLATE', 'MAGMA_CREAM_DISTILLATE', 'GLOWSTONE_DUST_DISTILLATE', 'NETHER_STALK_DISTILLATE', 'CRUDE_GABAGOOL_DISTILLATE'];
 
 // Rohstoffe, die in keiner Sammlung stehen, aber eindeutig zu einem Skill gehören
 const EXTRA = {
@@ -47,11 +50,14 @@ const EXTRA = {
     'DIVAN_FRAGMENT', 'DIVAN_POWDER_COATING', 'STARFALL', 'VOLTA', 'SUSPICIOUS_SCRAP', 'GLACITE_AMALGAMATION', 'GLACITE_JEWEL', 'BLUE_ICE_HUNK', 'PRECURSOR_APPARATUS',
     'GOBLIN_EGG', 'GOBLIN_EGG_BLUE', 'GOBLIN_EGG_GREEN', 'GOBLIN_EGG_RED', 'GOBLIN_EGG_YELLOW', 'MITHRIL_ORE'],
   COMBAT: ['PROTECTOR_FRAGMENT', 'OLD_FRAGMENT', 'YOUNG_FRAGMENT', 'HOLY_FRAGMENT', 'SUPERIOR_FRAGMENT', 'STRONG_FRAGMENT', 'UNSTABLE_FRAGMENT', 'WISE_FRAGMENT',
-    'ARACHNE_FRAGMENT', 'ARACHNE_KEEPER_FRAGMENT', 'ARACHNE_FANG', 'KUUDRA_TENTACLE', 'KUUDRA_TEETH', 'CORRUPTED_FRAGMENT', 'ECTOPLASM'],
+    'ARACHNE_FRAGMENT', 'ARACHNE_KEEPER_FRAGMENT', 'ARACHNE_FANG', 'KUUDRA_TENTACLE', 'KUUDRA_TEETH', 'CORRUPTED_FRAGMENT', 'ECTOPLASM', 'SUMMONING_EYE',
+    'GRIFFIN_FEATHER', 'BRAIDED_GRIFFIN_FEATHER', 'DAEDALUS_STICK', 'ANCIENT_CLAW', 'ENCHANTED_ANCIENT_CLAW', 'GRIFFIN_UPGRADE_STONE_UNCOMMON', 'GRIFFIN_UPGRADE_STONE_RARE',
+    'GRIFFIN_UPGRADE_STONE_EPIC', 'GRIFFIN_UPGRADE_STONE_LEGENDARY', 'GRIFFIN_UPGRADE_STONE_MYTHIC'],
+  DUNGEONS: ['KISMET_FEATHER'],
   FISHING: ['NURSE_SHARK_TOOTH', 'BLUE_SHARK_TOOTH', 'TIGER_SHARK_TOOTH', 'GREAT_WHITE_SHARK_TOOTH', 'SHARK_FIN', 'ENCHANTED_SHARK_FIN', 'CHUM', 'EMPTY_CHUM_BUCKET',
     'FULL_CHUM_BUCKET', 'THUNDER_SHARDS', 'TITANOBOA_SHED', 'ALLIGATOR_SKIN', 'AGARIMOO_TONGUE', 'SCUTTLER_SHELL', 'CAN_OF_WORMS', 'MAGMA_LORD_FRAGMENT', 'FLAMES'],
 };
-const PATTERNS = [[/_FOSSIL$/, 'MINING'], [/^GLACITE_/, 'MINING'], [/^DIVAN_/, 'MINING']];
+const PATTERNS = [[/_FOSSIL$/, 'MINING'], [/^GLACITE_/, 'MINING'], [/^DIVAN_/, 'MINING'], [/_WATER_ORB$/, 'FISHING'], [/_BAIT$/, 'FISHING']];
 
 function make(hyItems, collections, recipes){
   const hy = {}; for (const it of hyItems || []) hy[it.id] = it;
@@ -86,13 +92,13 @@ function make(hyItems, collections, recipes){
       stack.add(id); const score = {};
       for (const ins of byOut.get(id)) for (const ing in ins){
         const x = cat(ing, depth + 1, stack);
-        if (x && x !== 'OTHER_RES' && x !== 'MISC' && x !== 'ENCHANTMENTS') score[x] = (score[x] || 0) + ins[ing];
+        if (x && x !== 'ODDITIES' && x !== 'ENCHANTMENTS') score[x] = (score[x] || 0) + ins[ing];
       }
       stack.delete(id);
       const best = Object.entries(score).sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1))[0];
       if (best) c = best[0];
     }
-    if (!c) c = hy[id] && hy[id].category && hy[id].category !== 'NONE' ? 'MISC' : 'OTHER_RES';
+    if (!c) c = 'ODDITIES';
     if (depth === 0) memo[id] = c;
     return c;
   }

@@ -13,7 +13,7 @@ const DAY = E.DAY;
 const OUT = process.argv[2] || 'market.json';
 const LIMIT = process.argv.includes('--limit') ? +process.argv[process.argv.indexOf('--limit') + 1] : Infinity;
 const H = 'https://api.hypixel.net/v2/', C = 'https://sky.coflnet.com/api/';
-const UA = {'User-Agent': 'SkyBlockHub-Marktanalyse (github.com/Kaiserlingo/Skyblock-Tools)'};
+const UA = {'User-Agent': 'SkyBlockTools-Marktanalyse (github.com/Kaiserlingo/Skyblock-Tools)'};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const DAYS = 366;              // ein Jahr + heute
 const LIQUID = 5e6;            // Coins Umsatz pro Tag, ab dem ein Item in Ranglisten zählt
@@ -58,29 +58,11 @@ const names = {};
 for (const it of coflItems || []) if (it.tag && it.name) names[it.tag] = it.name;
 for (const it of itemsRes.items || []) names[it.id] = it.name.replace(/§./g, '');
 
-/* ---------- Sektoren: über Sammlungen und Rezepte ---------- */
-const SECTORS = {FARMING: 'Landwirtschaft', MINING: 'Bergbau', COMBAT: 'Kampf', FORAGING: 'Holz', FISHING: 'Fischerei', RIFT: 'Rift', DUNGEONS: 'Dungeons', ENCHANT: 'Verzauberungen', OTHER: 'Sonstiges'};
-const collOf = {};
-for (const type in coll.collections || {}) for (const id in coll.collections[type].items || {}) collOf[id] = type;
-const byOut = new Map(); for (const [o, cnt, ins] of recipes){ if (!byOut.has(o)) byOut.set(o, []); byOut.get(o).push([cnt, ins]); }
-const P = bz.products, mid = id => { const q = P[id] && P[id].quick_status; return q ? ((q.buyPrice || 0) + (q.sellPrice || 0)) / 2 || null : null; };
-const secMemo = {};
-function sector(id, d = 0, stack = new Set()){
-  if (secMemo[id]) return secMemo[id];
-  let s = collOf[id];
-  if (!s && id.startsWith('ESSENCE_')) s = 'DUNGEONS';
-  if (!s && id.startsWith('ENCHANTMENT_')) s = 'ENCHANT';
-  if (!s && d < 6 && byOut.has(id) && !stack.has(id)){
-    stack.add(id); const score = {};
-    for (const [, ins] of byOut.get(id)) for (const ing in ins){ const x = sector(ing, d + 1, stack); if (x && x !== 'OTHER') score[x] = (score[x] || 0) + ins[ing] * (mid(ing) || 1); }
-    stack.delete(id);
-    const best = Object.entries(score).sort((a, b) => b[1] - a[1])[0]; if (best) s = best[0];
-  }
-  if (!s && SECTORS[collOf[id]]) s = collOf[id];
-  s = SECTORS[s] ? s : 'OTHER';
-  if (d === 0) secMemo[id] = s;
-  return s;
-}
+/* ---------- Kategorien (js/categories.js, dieselbe Einteilung wie auf der Website) ---------- */
+const Cat = require(join(ROOT, 'js', 'categories.js'));
+const SECTORS = Object.fromEntries(Cat.ORDER.map(k => [k, Cat.CATS[k]]));
+const sector = Cat.make(itemsRes.items || [], coll.collections || {}, recipes);
+const P = bz.products;
 
 /* ---------- Mayor-Amtszeiten ---------- */
 const terms = (Array.isArray(mayorsRaw) ? mayorsRaw : []).map(m => ({
@@ -185,9 +167,9 @@ for (const id of ids){
 
 const cur = election.mayor || {};
 const out = {
-  v: 3, eventWindow: W, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID, indexMin: INDEX_MIN, minWeek: MIN_WEEK,
+  v: 4, eventWindow: W, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID, indexMin: INDEX_MIN, minWeek: MIN_WEEK,
   sources: {bazaar: bz.lastUpdated, history: 'SkyCofl (sky.coflnet.com)', news: 'Hypixel /skyblock/news', mayors: 'SkyCofl /api/mayor'},
-  sectors: Object.fromEntries(Object.entries(SECTORS).map(([k, l]) => [k, {label: l, items: ids.filter(id => sector(id) === k).length, index: secIdx[k] ? secIdx[k].n : 0}])),
+  sectors: Object.fromEntries(Object.entries(SECTORS).filter(([k]) => ids.some(id => sector(id) === k)).map(([k, l]) => [k, {label: l, items: ids.filter(id => sector(id) === k).length, index: secIdx[k] ? secIdx[k].n : 0}])),
   index: {spi: spi.v.map(r6), n: spi.n, sec: Object.fromEntries(Object.entries(secIdx).map(([k, x]) => [k, x.v]))},
   news: newsList, updates, terms: terms.slice(-80), mayorFx,
   election: {mayor: cur.name ? {name: cur.name, key: cur.key, perks: (cur.perks || []).map(p => p.name), minister: cur.minister ? cur.minister.name : null} : null},
