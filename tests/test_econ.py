@@ -132,5 +132,8 @@ for trial in range(10):
     r = node(f"return E.hampel({json.dumps(v)});"); ref = hampel_ref(v)
     for i in range(120): check(f'hampel {trial}/{i}', ref[i], r[i])
 
+r = node("""const L=[{t:Date.UTC(2026,0,1),v:1},{t:Date.UTC(2026,0,5,2),v:5},{t:Date.UTC(2026,0,6,2),v:6}], R=[{t:Date.UTC(2026,0,4,12),v:40},{t:Date.UTC(2026,0,5,0),v:50},{t:Date.UTC(2026,0,5,10),v:51}];
+  return E.mergeRecent(L,R,Date.UTC(2026,0,5)).map(p=>p.v);""")
+check('mergeRecent', 1.0, 1.0 if r == [1, 50, 51] else 0.0)
 print(f"geprüft: {checks}, Fehler: {len(fails)}")
 for f in fails: print('  ', f)

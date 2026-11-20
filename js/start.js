@@ -24,9 +24,9 @@ function name(id){ return M() ? M().nm(id) : pretty(id); }
    Jedes Signal: {type, id, strength, title, text, bz (Bazaar-Item?)}
    strength sortiert die Liste: je ungewöhnlicher, desto weiter oben. */
 const TYPES = {
-  jump:  {label: 'Preissprung', desc: 'Der Live-Preis weicht ungewöhnlich stark vom Tagespreis ab.'},
+  jump:  {label: 'Preissprung', desc: 'Der Live-Preis weicht ungewöhnlich stark vom Durchschnitt der letzten 24 Stunden ab, gemessen an der üblichen Schwankung des Items.'},
   mayor: {label: 'Mayor-Wechsel', desc: 'Der Mayor wechselt bald, und diese Items haben unter dem Wahlführenden bisher regelmäßig zugelegt.'},
-  ah:    {label: 'AH-Schnäppchen', desc: 'Der Lowest BIN liegt deutlich unter dem nächsten Angebot. Nach Gebühren bleibt beim Weiterverkauf Gewinn.'},
+  ah:    {label: 'AH-Schnäppchen', desc: 'Der Lowest BIN liegt deutlich unter dem nächsten Angebot. Nach Gebühren bliebe beim Weiterverkauf Gewinn. Prüf vor dem Kauf, ob sich die Exemplare unterscheiden (Stars, Enchants, Attribute, Reforge).'},
   npc:   {label: 'Unter NPC-Preis', desc: 'Kaufen per Instabuy und an den NPC verkaufen bringt sofort Gewinn.'},
 };
 function signals(){
@@ -34,13 +34,13 @@ function signals(){
   // 1) Preissprung: Live-Marktpreis (gleiche Formel wie die Tagesdaten) gegen den letzten Tagespreis
   if (md && S.rows.length){
     for (const id in md.items){
-      const o = md.items[id], p = S.products[id]; if (!o.liq || !o.p || !o.v30 || !p) continue;
+      const o = md.items[id], p = S.products[id], ref = o.p24; if (!o.liq || !ref || !o.v30 || !p) continue;
       const q = p.quick_status || {}, live = E.bazaarPrice({buy: q.buyPrice, sell: q.sellPrice, buyMovingWeek: q.buyMovingWeek, sellMovingWeek: q.sellMovingWeek});
       if (!live) continue;
-      const dev = live / o.p - 1, z = Math.log(live / o.p) / o.v30;
-      if (Math.abs(dev) >= .05 && Math.abs(z) >= 3) out.push({type: 'jump', id, bz: true, strength: Math.abs(z),
-        title: dev > 0 ? `${P(dev)} gegenüber gestern` : `${P(dev)} gegenüber gestern`,
-        text: `Sonst bewegt sich der Preis um etwa ${P(o.v30, false)} am Tag. Live ${price(live)}, Tagespreis ${price(o.p)}.`});
+      const dev = live / ref - 1, z = Math.log(live / ref) / o.v30;
+      if (Math.abs(dev) >= .05 && Math.abs(z) >= 3) out.push({type: 'jump', id, bz: true, strength: Math.min(8, Math.abs(z) / 2),
+        title: `${P(dev)} gegenüber den 24 h davor`,
+        text: `Live ${price(live)}, Ø der 24 Stunden vor ${new Date(md.built).toLocaleString('de-AT', {day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'})}: ${price(ref)}. Sonst bewegt sich der Preis um etwa ${P(o.v30, false)} am Tag.`});
     }
   }
   // 2) Mayor-Wechsel: Wahlführender und seine typischen Gewinner (mind. 3 Amtszeiten, meist gestiegen)
@@ -58,11 +58,11 @@ function signals(){
   // 3) AH-Schnäppchen: Lowest BIN weit unter dem zweitgünstigsten Angebot
   if (px && (!d.pxAge || d.pxAge < 30 * 60e3)){
     for (const id in px.items){
-      const x = px.items[id]; if (x.b == null || !x.l5 || x.l5.length < 2 || x.n < 5 || x.b < 5e5 || x.v) continue;
+      const x = px.items[id]; if (x.b == null || !x.l5 || x.l5.length < 3 || x.n < 8 || x.b < 5e5 || x.v) continue;
       const next = x.l5[1], gain = next * (1 - M().ahFee(next)) - x.b;
       if (next / x.b - 1 >= .15 && gain > 0) out.push({type: 'ah', id, bz: false, strength: Math.min(6, 1 + Math.log10(gain / 1e5 + 1) * 2),
         title: `Lowest BIN ${P(1 - x.b / next, false)} unter dem nächsten Angebot`,
-        text: `Kaufen für ${price(x.b)}, nächstes Angebot ${price(next)}. Nach Gebühren etwa ${fmt(gain)} Gewinn beim Weiterverkauf knapp darunter. ${NF0.format(x.n)} BIN-Angebote.`});
+        text: `Kaufen für ${price(x.b)}, nächstes Angebot ${price(next)}. Nach Gebühren etwa ${fmt(gain)} Gewinn beim Weiterverkauf zum nächsten Preis. ${NF0.format(x.n)} BIN-Angebote. Prüf, ob sich die Exemplare unterscheiden.`});
     }
   }
   // 4) Unter NPC-Preis (aus den Live-Daten des Flippers)

@@ -140,6 +140,13 @@ E.hampel = function(v, k = 3, t = 3, floor = .005){
   }
   return out;
 };
+/* Langer Verlauf (SkyCofl liefert ihn als Tagespunkte, mit 1 bis 2 Tagen Verzögerung) plus die letzten
+   7 Tage in 2-Stunden-Punkten (aktuell). Ab dem Tag cut zählen nur noch die Punkte der kurzen Reihe. */
+E.mergeRecent = function(longPts, recentPts, cut){
+  const r = (recentPts || []).filter(p => num(p.t) && p.t >= cut);
+  if (!r.length) return (longPts || []).slice();
+  return (longPts || []).filter(p => p.t < cut).concat(r).sort((a, b) => a.t - b.t);
+};
 E.lastIdx = v => { for (let i = v.length - 1; i >= 0; i--) if (num(v[i])) return i; return -1; };
 // Veränderung über k Tage (bezogen auf den letzten vorhandenen Tag)
 E.change = function(v, k){

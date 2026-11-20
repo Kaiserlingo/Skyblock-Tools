@@ -122,7 +122,7 @@ function nm(id){
   const h = K.hy && K.hy[id]; if (h && h.name) return h.name;
   const m = K.md && K.md.items[id]; if (m && m.n) return m.n;
   const c = K.catMap && K.catMap[id]; if (c && c.name) return c.name;
-  const x = pxOf(id); if (x && x.name) return x.name;
+  const x = pxOf(id); if (x && x.name && /[a-z]/.test(x.name)) return x.name;   // Werbetexte wie „UPCOMING SALE“ überspringen
   return pretty(id);
 }
 function kind(id){
@@ -545,7 +545,7 @@ async function mountItem(){
   const enc = encodeURIComponent(id);
   try{
     if (k.bz){
-      const [h1, h14] = await Promise.all([getJSON(COFL + `bazaar/${enc}/history?start=${y}&end=${n}`, 30 * 60e3), getJSON(COFL + `bazaar/${enc}/history?start=${new Date(now - 7 * DAY).toISOString()}&end=${n}`, 5 * 60e3).catch(() => null)]);
+      const [h1, h14] = await Promise.all([getJSON(COFL + `bazaar/${enc}/history?start=${y}&end=${n}`, 30 * 60e3), getJSON(COFL + `bazaar/${enc}/history?start=${new Date(K.md ? K.md.days.to - 6 * DAY : now - 7 * DAY).toISOString()}&end=${n}`, 5 * 60e3).catch(() => null)]);
       I.h1 = bzPoints(h1); I.h7 = bzPoints(h14);
     } else if (k.ah){
       const [full, week, sold] = await Promise.allSettled([
@@ -616,7 +616,9 @@ function analyze(I){
   const md = K.md, id = I.id, A = {};
   const T = md ? K.mdT : null, end = md ? md.days.to : E.dayStart(Date.now());
   const days = T ? T.length : 366;
-  const d = E.daily((I.h1 || []).map(p => ({t: p.t, v: p.v})), {days, end});
+  // wie die Pipeline: ab recentCut die aktuellen 2-Stunden-Punkte statt der verzögerten Tagespunkte
+  const pts = I.k.bz && md && md.recentCut ? E.mergeRecent(I.h1 || [], I.h7 || [], md.recentCut) : (I.h1 || []);
+  const d = E.daily(pts.map(p => ({t: p.t, v: p.v})), {days, end});
   A.T = d.t; A.v = E.hampel(d.v);
   A.spi = md ? md.index.spi : null;
   A.L = E.lastIdx(A.v); A.p = A.L >= 0 ? A.v[A.L] : null;
