@@ -307,3 +307,10 @@ td.mut,td.l.mut{font-family:var(--font);font-size:13px}
 td{font-size:12.5px}
 .chk{font-size:12px}
 .mk-itabs button.on{border-bottom-color:var(--area)}
+/* Zahlen in Tabellen und Listen in normaler Schrift: In Pixelschrift sind Komma und Punkt
+   bei kleiner Größe kaum zu unterscheiden. Pixelschrift bleibt für Namen, Überschriften und Knöpfe. */
+td,.facts dd,.rank .v,.mk-vrow b{font-family:var(--font);font-size:13.5px;font-weight:500;font-variant-numeric:tabular-nums}
+td small,.rank .v small{font-weight:400}
+td .item .nm{font-family:var(--px);font-size:12.5px;font-weight:400}
+.facts dd{font-size:13.5px}
+.figures dd{font-size:21px}
