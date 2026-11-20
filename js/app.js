@@ -54,6 +54,8 @@ const TOOL = Object.fromEntries(TOOLS.map(t => [t.id, t]));
    ========================================================= */
 const API = 'https://api.hypixel.net/v2/skyblock/bazaar';
 const ITEMS_API = 'https://api.hypixel.net/v2/resources/skyblock/items';
+// Spread-Verlauf der letzten 7 Tage je Item (alle 6 h aus SkyCofl-Daten erzeugt, siehe tools/build_market.mjs)
+const STATS_URL = 'https://raw.githubusercontent.com/Kaiserlingo/Skyblock-Tools/data/bazaar_stats.json';
 const MAX_ORDER = 71680;
 const HOUR = 3600e3;
 const LS = 'bzt:';
@@ -62,7 +64,7 @@ const DEFAULTS = {
   interval: 20, tax: 1.25, budget: 10_000_000, share: 10,
   preset: 'balanced',
   minVolH: 100, minTurnH: 2_000_000, minBalance: 30,
-  minProfit: 1, minPct: 2, maxPct: 50, maxDev: 8, hideRisky: true,
+  minProfit: 1, minPct: 2, maxPct: 50, maxDev: 8, hideRisky: true, maxSpreadRatio: 2.5, minOkShare: 50,
   craftBuy: 'order', craftSell: 'offer', craftMinProfit: 0, craftMinPct: 3,
   marketLiquidOnly: false,
   retentionH: 48, pageSize: 50, sound: true, theme: 'system', minCycle: 5,
@@ -73,13 +75,13 @@ const DEFAULTS = {
 //  Riskant    – auch langsame/schwankende Items, aber nur wenn die Marge das Risiko bezahlt
 const PRESETS = {
   safe:     {label:'Sicher', desc:'Sehr gefragte, stabile Items. Orders füllen sich schnell, Margen sind klein.',
-             minVolH: 500, minTurnH: 10_000_000, minBalance: 50, minPct: 1, maxPct: 20,  craftMinPct: 2, maxDev: 3,    hideRisky: true},
+             minVolH: 500, minTurnH: 10_000_000, minBalance: 50, minPct: 1, maxPct: 20,  craftMinPct: 2, maxDev: 3,    hideRisky: true,  maxSpreadRatio: 1.5,  minOkShare: 70},
   balanced: {label:'Ausgewogen', desc:'Gefragte Items mit spürbarer Marge – der beste Mix aus Tempo und Gewinn.',
-             minVolH: 100, minTurnH: 2_000_000,  minBalance: 30, minPct: 2, maxPct: 50,  craftMinPct: 3, maxDev: 8,    hideRisky: true},
+             minVolH: 100, minTurnH: 2_000_000,  minBalance: 30, minPct: 2, maxPct: 50,  craftMinPct: 3, maxDev: 8,    hideRisky: true,  maxSpreadRatio: 2.5,  minOkShare: 50},
   risky:    {label:'Riskant', desc:'Auch langsame oder schwankende Items – dafür muss die Marge hoch sein.',
-             minVolH: 10,  minTurnH: 250_000,    minBalance: 10, minPct: 5, maxPct: 300, craftMinPct: 5, maxDev: 1000, hideRisky: false},
+             minVolH: 10,  minTurnH: 250_000,    minBalance: 10, minPct: 5, maxPct: 300, craftMinPct: 5, maxDev: 1000, hideRisky: false, maxSpreadRatio: 1000, minOkShare: 0},
 };
-const PRESET_KEYS = ['minVolH','minTurnH','minBalance','minPct','maxPct','craftMinPct','maxDev','hideRisky'];
+const PRESET_KEYS = ['minVolH','minTurnH','minBalance','minPct','maxPct','craftMinPct','maxDev','hideRisky','maxSpreadRatio','minOkShare'];
 // Klartext der Kriterien einer Strategie (für das Filter-Panel)
 function presetRules(p){
   return [
@@ -88,6 +90,8 @@ function presetRules(p){
     `schwächere Seite ≥ <b>${p.minBalance} %</b> der stärkeren`,
     `Marge <b>${NF1.format(p.minPct)}–${NF0.format(p.maxPct)} %</b> (Craft ≥ ${NF1.format(p.craftMinPct)} %)`,
     p.maxDev >= 1000 ? 'Ausreißer im Orderbuch erlaubt' : `Top-Preis höchstens <b>${NF1.format(p.maxDev)} %</b> vom Durchschnitt im Orderbuch entfernt`,
+    p.maxSpreadRatio >= 1000 ? 'Spread darf beliebig vom Üblichen abweichen' : `Spread höchstens <b>${NF1.format(p.maxSpreadRatio)}-mal</b> so groß wie in den letzten 7 Tagen üblich`,
+    p.minOkShare > 0 ? `Flip war in den letzten 7 Tagen mind. <b>${p.minOkShare} %</b> der Zeit lohnend` : 'Spread-Verlauf der letzten 7 Tage egal',
     p.hideRisky ? 'Items mit Warnhinweis ausgeblendet' : 'Items mit Warnhinweis werden gezeigt',
   ];
 }
@@ -103,6 +107,8 @@ const SLIDERS = {
   maxPct:      {label:'Max. Marge', steps:[10,20,30,50,75,100,150,200,300,500], f: v => NF0.format(v) + ' %', hint:'Höhere Margen sind oft Manipulation oder kaum gehandelt.'},
   minCycle:    {label:'Mindestens pro Durchlauf', steps:[1,2,3,5,10,15,30,60], f: v => v + ' min', hint:'Zeit, die du pro Kaufen-und-Verkaufen-Runde mindestens brauchst (Orders setzen, abholen, neu einstellen).'},
   maxDev:      {label:'Max. Ausreißer im Orderbuch', steps:[1,2,3,5,8,10,15,25,50,1000], f: v => v >= 1000 ? 'aus' : NF1.format(v) + ' %', hint:'Wie weit der oberste Preis vom gewichteten Durchschnitt der besten Orders abweichen darf. Fängt einzelne Lock- oder Dump-Orders ab.'},
+  maxSpreadRatio: {label:'Max. Spread gegenüber üblich', steps:[1.2,1.5,2,2.5,3,4,6,1000], f: v => v >= 1000 ? 'aus' : NF1.format(v) + '-fach', hint:'Ist der Spread gerade viel größer als in den letzten 7 Tagen üblich, ist der hohe Gewinn meist nur kurz da: Der Preis kehrt zurück, bevor deine Sell-Offer gefüllt ist.'},
+  minOkShare:  {label:'Lohnend in den letzten 7 Tagen', steps:[0,25,40,50,60,70,80,90], f: v => v ? 'mind. ' + v + ' % der Zeit' : 'aus', hint:'Wie oft der Spread in den letzten 7 Tagen groß genug war, um nach Steuer Gewinn zu machen. Ein Flip, der fast immer lohnt, ist verlässlicher.'},
   interval:    {label:'Aktualisierung alle', steps:[10,15,20,30,45,60,120], f: v => v + ' s', hint:'Hypixel aktualisiert den Bazaar etwa alle 20 Sekunden.'},
 };
 
@@ -111,7 +117,7 @@ function save(k, v){ try{ localStorage.setItem(LS+k, JSON.stringify(v)); }catch{
 
 const S = {
   set: {},
-  products: {}, rows: [], byId: {}, crafts: [],
+  products: {}, rows: [], byId: {}, crafts: [], stats: null, statsErr: false,
   names: {}, npc: {}, tiers: {},
   hist: {},
   lastUpdated: 0, lastFetch: 0, nextAt: 0, paused: false, timer: null, state: 'load', banner: '',
@@ -122,7 +128,7 @@ const S = {
   detail: null, craftDetail: null, itemId: null, mchart: null, achart: null,
   prevPrice: {}, lastSave: Date.now(), sessionStart: Date.now(), polls: 0,
 };
-const DEFAULT_SORT = {flips:{k:'pph',d:-1}, crafts:{k:'pph',d:-1}, market:{k:'wVol',d:-1}, npc:{k:'npcTotal',d:-1}};
+const DEFAULT_SORT = {flips:{k:'pphTyp',d:-1}, crafts:{k:'pph',d:-1}, market:{k:'wVol',d:-1}, npc:{k:'npcTotal',d:-1}};
 // Eingaben dieses Browsers laden
 function applyState(d){
   S.set = Object.assign({}, DEFAULTS, d.settings || {});
@@ -289,6 +295,26 @@ async function loadItems(){
     applyItems(obj); save('items', obj);
   }catch(e){ console.warn('Items konnten nicht geladen werden', e); }
 }
+async function loadStats(){
+  try{
+    const r = await fetch(STATS_URL + '?t=' + Math.floor(Date.now() / 60e3), {cache:'no-store'});
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    if (!j || !j.items || typeof j.items !== 'object') throw new Error('leer');
+    S.stats = j; S.statsErr = false;
+  }catch(e){ console.warn('Spread-Verlauf konnte nicht geladen werden', e); S.statsErr = !S.stats; }
+  if (S.rows.length) ingest(false);
+}
+// Anteil der Zeit, in der der Spread mindestens x war (21 Quantile, linear interpoliert) – gleiche Rechnung wie E.shareAbove
+function shareAbove(sq, x){
+  if (!sq || sq.length !== 21 || x == null || !isFinite(x)) return null;
+  if (x <= sq[0]) return 1; if (x > sq[20]) return 0;
+  for (let k = 0; k < 20; k++){
+    const a = sq[k], b = sq[k + 1];
+    if (x <= b){ const f = b > a ? (x - a) / (b - a) : 1; return 1 - (k + f) / 20; }
+  }
+  return 0;
+}
 function applyItems(o){ S.names = o.names || {}; S.npc = o.npc || {}; S.tiers = o.tiers || {}; }
 
 /* =========================================================
@@ -407,8 +433,56 @@ function assess(r){
   if (r.dev > 25) r.risk.push('Der oberste Preis weicht stark vom Durchschnitt der besten Orders ab (' + NF0.format(r.dev) + ' %) – mögliche Lock- oder Dump-Order');
   if (r.perHour < 5) r.risk.push('Sehr wenig Volumen – Orders füllen sich nur langsam');
   if (r.marginPct > 100) r.risk.push('Extreme Marge – oft Manipulation oder kaum Handel');
+  reliability(r, q);
   const t = trendCache[r.id];
   r.d1h = t ? t.d1h : null; r.d24h = t ? t.d24h : null;
+}
+/* Verlässlichkeit aus dem Verlauf der letzten 7 Tage (Spread, Preisniveau, Trend, Volumen).
+   Spreads werden wie im Verlauf aus den gewichteten Preisen der besten Orders (quick_status) gerechnet,
+   damit „jetzt" und „üblich" dieselbe Größe sind. */
+function reliability(r, q){
+  const st = S.stats && S.stats.items && S.stats.items[r.id];
+  r.st = st || null;
+  r.sNow = r.sMed = r.sRatio = r.okShare = r.askDev = r.bidDev = r.tr7 = r.vt7 = r.swing = r.drift = null;
+  r.profitTyp = r.profit; r.pphTyp = r.pph;
+  if (!q || !(q.buyPrice > 0) || !(q.sellPrice > 0)) return;
+  r.sNow = q.buyPrice / q.sellPrice - 1;
+  if (!st || !st.sq) return;
+  const tax = S.set.tax / 100;
+  r.sMed = st.sq[10];
+  r.sRatio = r.sMed > 0 ? r.sNow / r.sMed : null;
+  // Anteil der Zeit, in der der Flip lohnend war: dein Spread (Sell-Offer/Buy-Order) im Verhältnis zum gewichteten Spread
+  const own = r.buyAt > 0 && r.sellAt > 0 ? r.sellAt / r.buyAt - 1 : null;
+  const k = own != null && r.sNow > 0 && own > 0 ? own / r.sNow : 1;
+  r.okShare = shareAbove(st.sq, tax / (1 - tax) / k);
+  r.askDev = st.am > 0 ? q.buyPrice / st.am - 1 : null;
+  r.bidDev = st.bm > 0 ? q.sellPrice / st.bm - 1 : null;
+  r.tr7 = st.tr; r.vt7 = st.vt; r.swing = st.ra;
+  // Gewinn bei üblichem Spread: ist der Spread gerade größer als üblich, rechnen wir mit dem üblichen
+  if (r.buyAt > 0 && r.sellAt > 0 && r.sRatio != null){
+    const ownTyp = own / Math.max(r.sRatio, 1);
+    r.profitTyp = Math.min(r.profit, r.buyAt * (1 + ownTyp) * (1 - tax) - r.buyAt);
+    r.pphTyp = r.profitTyp > 0 ? r.profitTyp * r.qty : 0;
+  }
+  // erwarteter Preisrückgang während eines Durchlaufs (bei fallendem 7-Tage-Trend)
+  const T = r.qty > 0 ? r.maxQty / r.qty : 0;   // Stunden pro Durchlauf
+  if (r.tr7 != null && r.tr7 < 0 && T > 0) r.drift = -r.tr7 / (6 * 24) * T * r.sellAt;
+  if (r.sRatio != null && r.sRatio > 3 && r.sNow > 0.01) r.risk.push(`Spread gerade ${NF1.format(r.sRatio)}-mal so groß wie in den letzten 7 Tagen üblich – der Gewinn ist wahrscheinlich nur kurz da`);
+  if (r.askDev != null && r.askDev > 0.25) r.risk.push(`Instabuy-Preis ${NF0.format(r.askDev * 100)} % über dem Wochenmedian – Verkaufspreis könnte zurückfallen`);
+  if (r.bidDev != null && r.bidDev < -0.25) r.risk.push(`Instasell-Preis ${NF0.format(-r.bidDev * 100)} % unter dem Wochenmedian – ungewöhnlicher Preiseinbruch`);
+  if (r.tr7 != null && r.tr7 < -0.2) r.risk.push(`Preis in 7 Tagen um ${NF0.format(-r.tr7 * 100)} % gefallen – fallender Markt`);
+  if (r.vt7 != null && r.vt7 < -0.4) r.risk.push(`Handelsvolumen in 7 Tagen um ${NF0.format(-r.vt7 * 100)} % gesunken`);
+  if (r.drift != null && r.profit > 0 && r.drift > r.profit) r.risk.push('Der Preis fällt während eines Durchlaufs voraussichtlich stärker, als der Flip pro Stück einbringt');
+}
+// Spread-Filter: nur wenn der Verlauf geladen ist; Items ohne Verlauf fallen bei aktivem Filter heraus
+function spreadOk(r){
+  const s = S.set;
+  if (!S.stats) return true;
+  if (s.maxSpreadRatio >= 1000 && !(s.minOkShare > 0)) return true;
+  if (!r.st) return false;
+  if (s.maxSpreadRatio < 1000 && (r.sRatio == null || r.sRatio > s.maxSpreadRatio)) return false;
+  if (s.minOkShare > 0 && (r.okShare == null || r.okShare * 100 < s.minOkShare)) return false;
+  return true;
 }
 /* „Gefragt" = auf beiden Seiten viel Handel, damit sich Buy-Orders UND Sell-Offers schnell füllen */
 function liquid(r){
@@ -426,7 +500,7 @@ function filteredFlips(ignoreSearch){
   const s = S.set;
   return S.rows.filter(r =>
     r.profit >= s.minProfit && r.marginPct >= s.minPct && r.marginPct <= s.maxPct &&
-    liquid(r) && stable(r) && r.buyAt > 0 && r.buyAt <= s.budget &&
+    liquid(r) && stable(r) && spreadOk(r) && r.buyAt > 0 && r.buyAt <= s.budget &&
     (!s.hideRisky || !r.risk.length) && (ignoreSearch || matchSearch(r)));
 }
 
@@ -583,7 +657,7 @@ function banner(html){
   const b = $('#banner'); if (b){ b.innerHTML = html; b.style.display = html ? 'block' : 'none'; }
 }
 /* Einstellungen per Link teilen: #bazaar/overview~<kodierte Werte> */
-const SHARE_KEYS = ['budget','share','tax','minCycle','preset','minVolH','minTurnH','minBalance','minPct','maxPct','maxDev','minProfit','hideRisky','craftBuy','craftSell','craftMinPct','craftMinProfit'];
+const SHARE_KEYS = ['budget','share','tax','minCycle','preset','minVolH','minTurnH','minBalance','minPct','maxPct','maxDev','maxSpreadRatio','minOkShare','minProfit','hideRisky','craftBuy','craftSell','craftMinPct','craftMinProfit'];
 function shareLink(){
   const o = {}; for (const k of SHARE_KEYS) o[k] = S.set[k];
   const code = btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -810,7 +884,8 @@ function renderDrawer(){
   } else if (kind !== 'market'){
     secs.push(`<section><h3>Gewinn</h3>${sliderCtl('minPct')}${coinCtl('minProfit', 'Mindestgewinn pro Stück')}${sliderCtl('maxPct')}</section>`);
   }
-  if (kind !== 'market') secs.push(`<section><h3>Sicherheit</h3>${sliderCtl('maxDev')}${switchCtl('hideRisky', 'Items mit Warnhinweis ausblenden', 'Preisausreißer, mögliche Manipulation, kaum Handel')}</section>`);
+  if (kind === 'flips' || kind === 'overview') secs.push(`<section><h3>Verlässlichkeit (letzte 7 Tage)</h3><p class="note">Ein Flip ist verlässlich, wenn der Spread über längere Zeit ähnlich war. Ungewöhnlich große Spreads verschwinden meist schnell wieder.</p>${sliderCtl('maxSpreadRatio')}${sliderCtl('minOkShare')}</section>`);
+  if (kind !== 'market') secs.push(`<section><h3>Sicherheit</h3>${sliderCtl('maxDev')}${switchCtl('hideRisky', 'Items mit Warnhinweis ausblenden', 'Preisausreißer, mögliche Manipulation, kaum Handel, auffälliger Preisverlauf')}</section>`);
   $('#drawer').innerHTML = `<header><h2>Filter</h2><button class="btn ghost" data-act="closedrawer" aria-label="Filter schließen">Schließen</button></header>
     <div class="dbody">${secs.join('')}</div>
     <footer><button class="btn ghost" data-preset="balanced">Auf Ausgewogen zurücksetzen</button><button class="btn primary" data-act="closedrawer">Fertig</button></footer>`;
@@ -821,10 +896,10 @@ function renderDrawer(){
    ========================================================= */
 function bestNow(){
   if (!S.rows.length) return null;
-  const f = filteredFlips(true).sort((a,b) => b.pph - a.pph)[0];
+  const f = filteredFlips(true).sort((a,b) => b.pphTyp - a.pphTyp)[0];
   const c = filteredCrafts(true).sort((a,b) => b.pph - a.pph)[0];
   if (!f && !c) return {none: true};
-  return (!c || (f && f.pph >= c.pph)) ? {name: f.name, pph: f.pph, id: f.id, kind: 'flip'} : {name: c.name, pph: c.pph, ri: c.ri, kind: 'craft'};
+  return (!c || (f && f.pphTyp >= c.pph)) ? {name: f.name, pph: f.pphTyp, id: f.id, kind: 'flip'} : {name: c.name, pph: c.pph, ri: c.ri, kind: 'craft'};
 }
 function leadSentence(b){
   if (S.state === 'err' && !S.rows.length) return 'Hypixel antwortet gerade nicht. Die Seite versucht es automatisch weiter.';
@@ -856,7 +931,7 @@ function pageHub(){
 function emptyRow(cols, title, txt){ return `<tr class="emptyrow"><td colspan="${cols}"><b>${title}</b>${txt ? ' ' + txt : ''}</td></tr>`; }
 const PAGES = {
   overview(){
-    const flips = filteredFlips(true).sort((a,b) => b.pph - a.pph);
+    const flips = filteredFlips(true).sort((a,b) => b.pphTyp - a.pphTyp);
     const crafts = filteredCrafts(true).sort((a,b) => b.pph - a.pph);
     const liq = S.rows.filter(liquid);
     const busiest = S.rows.filter(r => r.topBuy && r.topSell).sort((a,b) => b.turnH - a.turnH).slice(0, 5);
@@ -870,7 +945,7 @@ const PAGES = {
       <p class="summary">${has ? `${NF0.format(liq.length)} von ${NF0.format(S.rows.length)} Bazaar-Produkten werden gerade genug gehandelt. Dein Budget: ${words(S.set.budget)} Coins.` : ''} <button class="link" data-act="filters">Alle Filter</button> oder <button class="link" data-act="sharelink">Link mit meinen Einstellungen kopieren</button></p>
       <div class="cols">
         <section><header><h2>Beste Flips</h2>${flips.length ? `<button class="link" data-tab="flips">Alle ${flips.length} ansehen</button>` : ''}</header>
-          ${list(flips.slice(0, 5).map(r => row(`data-open="${esc(r.id)}"`, r.id, r.name, `${price(r.buyAt)} kaufen, ${price(r.sellAt)} verkaufen`, fmt(r.pph), 'pro Stunde')), has ? 'Kein Flip passt zu deinen Filtern.' : 'Wird geladen …')}</section>
+          ${list(flips.slice(0, 5).map(r => row(`data-open="${esc(r.id)}"`, r.id, r.name, `${price(r.buyAt)} kaufen, ${price(r.sellAt)} verkaufen`, fmt(r.pphTyp), 'pro Stunde')), has ? 'Kein Flip passt zu deinen Filtern.' : 'Wird geladen …')}</section>
         <section><header><h2>Beste Craft-Flips</h2>${crafts.length ? `<button class="link" data-tab="crafts">Alle ${crafts.length} ansehen</button>` : ''}</header>
           ${list(crafts.slice(0, 5).map(c => row(`data-craft="${c.ri}"`, c.id, (c.cnt > 1 ? c.cnt + '× ' : '') + c.name, esc(c.ingredients), fmt(c.pph), 'pro Stunde')), has ? 'Kein Craft-Flip passt zu deinen Filtern.' : 'Wird geladen …')}</section>
         <section><header><h2>Am meisten gehandelt</h2><button class="link" data-tab="market">Zum Markt</button></header>
@@ -883,22 +958,24 @@ const PAGES = {
   flips(){
     const rows = sortRows(filteredFlips(), 'flips');
     const {slice, html} = paginate('flips', rows);
-    const max = Math.max(0, ...slice.map(r => r.pph));
+    const max = Math.max(0, ...slice.map(r => r.pphTyp));
     const head = `<tr>${th('', '', '', 1)}${th('flips','name','Item',1)}
       ${th('flips','buyAt','Buy-Order','', 'Höchste Buy-Order + 0,1')}
       ${th('flips','sellAt','Sell-Offer','', 'Niedrigste Sell-Offer − 0,1')}
       ${th('flips','profit','Gewinn pro Stück','', 'Nach ' + NF2.format(S.set.tax) + ' % Bazaar-Steuer')}
+      ${th('flips','sRatio','Spread jetzt / üblich','', 'Spread jetzt im Vergleich zum Median der letzten 7 Tage. Darunter: wie oft der Flip in dieser Zeit lohnend war.')}
       ${th('flips','perHour','Handel pro Stunde','', 'Stück pro Stunde auf der schwächeren Seite')}
-      ${th('flips','pph','Profit pro Stunde','', 'Geschätzt aus dem Wochenvolumen und deinem Anteil')}</tr>`;
+      ${th('flips','pphTyp','Profit pro Stunde','', 'Gerechnet mit dem üblichen Spread der letzten 7 Tage, falls er gerade größer ist. Darunter: mit dem aktuellen Spread.')}</tr>`;
     const body = slice.map(r => `<tr data-open="${esc(r.id)}">
       <td class="c-star">${starBtn(r.id)}</td>
       <td class="l">${itemCell(r.id, r.name, '', r.risk)}</td>
       <td class="buy ${flash(r.id+'b', r.buyAt)}">${price(r.buyAt)}</td>
       <td class="sell ${flash(r.id+'s', r.sellAt)}">${price(r.sellAt)}</td>
       <td>${price(r.profit)}<small>${pct(r.marginPct, false)}</small></td>
+      <td>${spreadCell(r)}</td>
       <td>${fmt(r.perHour)}</td>
-      <td>${bar(r.pph, max)}<small>${fmt(r.qty)} Stück pro Stunde</small></td></tr>`).join('');
-    return toolbar('flips', rows.length, rows.length === 1 ? 'Flip' : 'Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Kein Flip passt.', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table></div>${html}
+      <td>${bar(r.pphTyp, max)}<small>${r.pphTyp < r.pph ? 'jetzt ' + fmt(r.pph) : fmt(r.qty) + ' Stück pro Stunde'}</small></td></tr>`).join('');
+    return toolbar('flips', rows.length, rows.length === 1 ? 'Flip' : 'Flips') + statsNote() + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(8, 'Kein Flip passt.', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table></div>${html}
       <p class="hint">Setz eine Buy-Order zum grünen Preis. Sobald sie gefüllt ist, stellst du eine Sell-Offer zum Preis daneben ein. Klick auf eine Zeile für Verlauf und Orderbuch.</p>`;
   },
 
@@ -1026,6 +1103,36 @@ function book(arr, side){
     top.map(o => { cum += o.amount; return `<tr><td class="l p">${price(o.pricePerUnit)}</td><td class="amt">${fmt(o.amount)}<i style="width:${(o.amount/mx*100).toFixed(0)}%"></i></td><td class="mut">${o.orders}</td><td class="mut">${fmt(cum)}</td></tr>`; }).join('')
     || '<tr><td colspan="4" class="mut">leer</td></tr>'}</tbody></table>`;
 }
+// Spread jetzt gegenüber dem Üblichen: ruhig (≤ 1,5×), erhöht (≤ 3×), auffällig (> 3×)
+function spreadCell(r){
+  if (r.sRatio == null) return `<span class="mut" title="Für dieses Item gibt es noch keinen Verlauf">–</span>`;
+  const c = r.sRatio < 0.67 ? 'mut' : r.sRatio <= 1.5 ? 'pos' : r.sRatio <= 3 ? 'amber' : 'neg';
+  const word = r.sRatio < 0.67 ? 'kleiner' : r.sRatio <= 1.5 ? 'normal' : r.sRatio <= 3 ? 'erhöht' : 'auffällig';
+  return `<span class="${c}" title="Spread jetzt ${pct(r.sNow * 100, false)}, üblich ${pct(r.sMed * 100, false)}">${NF1.format(r.sRatio)}× ${word}</span><small>${r.okShare != null ? NF0.format(r.okShare * 100) + ' % der Zeit lohnend' : ''}</small>`;
+}
+function statsNote(){
+  if (S.stats) return '';
+  return `<p class="note">${S.statsErr ? 'Der Spread-Verlauf der letzten 7 Tage konnte nicht geladen werden. Die Verlässlichkeits-Filter sind solange aus.' : 'Spread-Verlauf der letzten 7 Tage wird geladen …'}</p>`;
+}
+function relDetail(r){
+  if (!r.st) return `<section class="block"><header><h3>Verlässlichkeit (letzte 7 Tage)</h3></header><p class="note">${S.stats ? 'Für dieses Item gibt es noch keinen ausreichenden Verlauf.' : S.statsErr ? 'Der Verlauf konnte nicht geladen werden.' : 'Wird geladen …'}</p></section>`;
+  const st = r.st, P = x => x == null ? '–' : pct(x * 100, false), S2 = x => x == null ? '–' : `<span class="${cls(x)}">${pct(x * 100)}</span>`;
+  const verdict = [];
+  if (r.sRatio != null) verdict.push(r.sRatio < 0.67 ? 'Der Spread ist gerade kleiner als üblich. Der Gewinn ist eher knapp – oft lohnt es sich, kurz abzuwarten.' : r.sRatio <= 1.5 ? 'Der Spread ist gerade so groß wie meistens – der Gewinn ist realistisch.' : r.sRatio <= 3 ? 'Der Spread ist größer als üblich. Rechne eher mit dem üblichen Gewinn.' : 'Der Spread ist ungewöhnlich groß. Solche Spreads schließen sich meist schnell wieder.');
+  if (r.okShare != null) verdict.push(r.okShare >= .7 ? 'Der Flip hat sich in den letzten 7 Tagen fast immer gelohnt.' : r.okShare >= .4 ? 'Der Flip hat sich in den letzten 7 Tagen nur zeitweise gelohnt.' : 'Der Flip hat sich in den letzten 7 Tagen selten gelohnt.');
+  if (r.swing != null && r.marginPct > 0 && r.swing * 100 > r.marginPct * 2) verdict.push('Der Preis schwankt innerhalb von 2 Stunden mehr als doppelt so stark wie deine Marge – du wirst oft überboten oder musst nachziehen.');
+  return `<section class="block"><header><h3>Verlässlichkeit (letzte 7 Tage)</h3></header>
+    ${verdict.length ? `<p class="note">${verdict.join(' ')}</p>` : ''}
+    ${facts([
+      ['Spread jetzt', P(r.sNow)], ['Spread üblich (Median)', P(r.sMed)], ['Üblicher Bereich', `${P(st.sq[5])} bis ${P(st.sq[15])}`], ['Spread 30 Tage (Median)', P(st.s30)],
+      ['Jetzt gegenüber üblich', r.sRatio != null ? NF1.format(r.sRatio) + '×' : '–'], ['Lohnend in den letzten 7 Tagen', r.okShare != null ? NF0.format(r.okShare * 100) + ' % der Zeit' : '–'],
+      ['Gewinn bei üblichem Spread', `<span class="${cls(r.profitTyp)}">${price(r.profitTyp)}</span>`], ['Profit pro Stunde (üblich)', fmt(r.pphTyp)],
+      ['Instabuy gegenüber Wochenmedian', S2(r.askDev)], ['Instasell gegenüber Wochenmedian', S2(r.bidDev)],
+      ['Preistrend 7 Tage', S2(r.tr7)], ['Volumentrend 7 Tage', S2(r.vt7)],
+      ['Typische Schwankung in 2 h', P(r.swing)], ['Deine Marge', pct(r.marginPct, false)],
+      ['Konkurrenz an der Spitze', `${NF0.format(r.topBuyOrders)} Buy-Orders, ${NF0.format(r.topSellOrders)} Sell-Offers`], ['Orders gesamt', `${NF0.format(r.sellOrders)} Buy, ${NF0.format(r.buyOrders)} Sell`],
+    ])}</section>`;
+}
 function figures(list){ return `<dl class="figures">${list.map(([l,v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>`; }
 function facts(list){ return `<dl class="facts">${list.map(([l,v]) => `<div><dt>${l}</dt><dd>${v}</dd></div>`).join('')}</dl>`; }
 function renderDetail(update){
@@ -1043,6 +1150,7 @@ function renderDetail(update){
   ]);
   if (update){
     $('#dStats').innerHTML = top + more;
+    $('#dRel').innerHTML = relDetail(r);
     $('#dBuy').innerHTML = book(p.sell_summary, 'buy');
     $('#dSell').innerHTML = book(p.buy_summary, 'sell');
     livePoint(S.mchart, id); return;
@@ -1060,6 +1168,7 @@ function renderDetail(update){
     </header>
     ${r.risk.length ? `<div class="banner warnb">${r.risk.map(esc).join('<br>')}</div>` : ''}
     <div id="dStats">${top}${more}</div>
+    <div id="dRel">${relDetail(r)}</div>
     <section class="block">
       <header><h3>Preisverlauf</h3><span class="legend"><span class="l-sell">Instabuy</span><span class="l-buy">Instasell</span></span><div class="spacer"></div>
         ${rangeSeg('mrange', chartPrefs.mrange, ['1h','24h','7d','local'])}</header>
@@ -1262,6 +1371,7 @@ PAGES.item = function(){
       </div>
     </header>
     <div id="aFig">${anaFigures(r)}</div>
+    <div id="aRel">${relDetail(r)}</div>
 
     <section class="ana-chart">
       <div class="ctrl">
@@ -1564,6 +1674,7 @@ function anaStats(){
 function updateAnalysis(){
   const r = S.byId[S.itemId]; if (!r) return;
   const f = $('#aFig'); if (f) f.innerHTML = anaFigures(r);
+  const rl = $('#aRel'); if (rl) rl.innerHTML = relDetail(r);
   const b = $('#aBuy'); if (b) b.innerHTML = book(S.products[S.itemId].sell_summary, 'buy');
   const sl = $('#aSell'); if (sl) sl.innerHTML = book(S.products[S.itemId].buy_summary, 'sell');
   refreshCalc(false);
@@ -1759,6 +1870,7 @@ document.addEventListener('visibilitychange', () => {
   S.hist = await DB.loadAll();
   const now = Date.now();
   for (const k in S.hist) compact(S.hist[k], now);
-  await Promise.all([loadItems(), loadRecipes()]);
+  await Promise.all([loadItems(), loadRecipes(), loadStats()]);
   poll();
+  setInterval(loadStats, HOUR);
 })();

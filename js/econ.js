@@ -147,6 +147,43 @@ E.mergeRecent = function(longPts, recentPts, cut){
   if (!r.length) return (longPts || []).slice();
   return (longPts || []).filter(p => p.t < cut).concat(r).sort((a, b) => a.t - b.t);
 };
+/* ---------- Spread-Statistik eines Bazaar-Items (für den Flipper) ----------
+   recent: SkyCofl-Punkte der letzten 7 Tage (2-Stunden-Schritte), daily: Tagespunkte (für 30 Tage).
+   buy = gewichteter Instabuy-Preis, sell = gewichteter Instasell-Preis (wie quick_status).
+   Spread = buy / sell − 1.  Ergebnis (gerundet):
+   sq  21 Quantile (0 %, 5 %, …, 100 %) des Spreads in den 7 Tagen
+   am/bm  Median Instabuy / Instasell der 7 Tage
+   ra/rb  typische Schwankung innerhalb eines 2-h-Abschnitts (Median von (max−min)/Preis)
+   tr  Veränderung des Mittelkurses: letzte 24 h gegenüber den ersten 24 h der 7 Tage
+   vt  Veränderung der Wochenmenge (Instabuys + Instasells) über die 7 Tage
+   s30 Median-Spread der letzten 30 Tage (Tagespunkte), n Zahl der Punkte */
+E.spreadStats = function(recent, daily, now){
+  const sig = x => x == null || !isFinite(x) ? null : +(+x).toPrecision(5);
+  const pts = (Array.isArray(recent) ? recent : []).map(o => ({t: E.parseUtc(o.timestamp), b: +o.buy, s: +o.sell, mb: +o.maxBuy, nb: +o.minBuy, ms: +o.maxSell, ns: +o.minSell, w: (+o.buyMovingWeek || 0) + (+o.sellMovingWeek || 0)}))
+    .filter(p => isFinite(p.t) && p.b > 0 && p.s > 0).sort((a, b) => a.t - b.t);
+  if (pts.length < 24) return null;
+  const sp = pts.map(p => p.b / p.s - 1);
+  const sq = []; for (let k = 0; k <= 20; k++) sq.push(sig(E.quantile(sp, k / 20)));
+  const ra = E.median(pts.filter(p => p.mb > 0 && p.nb > 0).map(p => (p.mb - p.nb) / p.b));
+  const rb = E.median(pts.filter(p => p.ms > 0 && p.ns > 0).map(p => (p.ms - p.ns) / p.s));
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t, mid = p => (p.b + p.s) / 2;
+  const first = pts.filter(p => p.t < t0 + DAY).map(mid), last = pts.filter(p => p.t > t1 - DAY).map(mid);
+  const d30 = (Array.isArray(daily) ? daily : []).map(o => ({t: E.parseUtc(o.timestamp), b: +o.buy, s: +o.sell})).filter(p => p.t > now - 30 * DAY && p.b > 0 && p.s > 0);
+  return {sq, am: sig(E.median(pts.map(p => p.b))), bm: sig(E.median(pts.map(p => p.s))), ra: sig(ra), rb: sig(rb),
+    tr: first.length && last.length ? sig(E.mean(last) / E.mean(first) - 1) : null,
+    vt: pts[0].w > 0 ? sig(pts[pts.length - 1].w / pts[0].w - 1) : null,
+    s30: d30.length >= 10 ? sig(E.median(d30.map(p => p.b / p.s - 1))) : null, n: pts.length};
+};
+// Anteil der Zeit, in der der Spread mindestens x war (aus den 21 Quantilen, linear interpoliert)
+E.shareAbove = function(sq, x){
+  if (!sq || sq.length !== 21 || x == null) return null;
+  if (x <= sq[0]) return 1; if (x > sq[20]) return 0;
+  for (let k = 0; k < 20; k++){
+    const a = sq[k], b = sq[k + 1];
+    if (x <= b){ const f = b > a ? (x - a) / (b - a) : 1; return 1 - (k + f) / 20; }
+  }
+  return 0;
+};
 E.lastIdx = v => { for (let i = v.length - 1; i >= 0; i--) if (num(v[i])) return i; return -1; };
 // Veränderung über k Tage (bezogen auf den letzten vorhandenen Tag)
 E.change = function(v, k){

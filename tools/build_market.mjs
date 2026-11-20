@@ -90,11 +90,12 @@ const hist = await pool(ids, 4, async id => {
   return {a, b};
 });
 
-const series = {};
+const series = {}, spreadStats = {};
 ids.forEach((id, k) => {
   const h = hist[k]; if (!h || !Array.isArray(h.a) || !h.a.length) return;
   const conv = arr => (Array.isArray(arr) ? arr : []).map(o => ({t: E.parseUtc(o.timestamp), v: E.bazaarPrice(o), mw: (+o.buyMovingWeek || 0) + (+o.sellMovingWeek || 0)})).filter(p => isFinite(p.t));
   const recent = conv(h.b), pts = E.mergeRecent(conv(h.a), recent, CUT);
+  spreadStats[id] = E.spreadStats(h.b, h.a, now);
   // Ø-Marktpreis der letzten 24 Stunden (Bezug für „Preissprung“ auf der Startseite)
   const last24 = recent.filter(p => p.t > now - DAY && p.v > 0).map(p => p.v);
   if (pts.length) series[id] = {pts, first: Math.min(...pts.map(p => p.t)), p24: last24.length >= 6 ? E.mean(last24) : null};
@@ -183,4 +184,9 @@ const out = {
   items,
 };
 writeFileSync(OUT, JSON.stringify(out));
+// Spread-Statistik für den Bazaar Flipper (eigene, kleine Datei)
+const statsOut = {v: 1, built: now, from: now - 6.9 * DAY, items: {}};
+for (const id in spreadStats) if (spreadStats[id]) statsOut.items[id] = spreadStats[id];
+writeFileSync(OUT.replace(/[^/]+$/, 'bazaar_stats.json'), JSON.stringify(statsOut));
+console.log(`Spread-Statistik: ${Object.keys(statsOut.items).length} Items, ${(JSON.stringify(statsOut).length / 1e6).toFixed(2)} MB`);
 console.log(`Fertig: ${Object.keys(items).length} Items, Index aus ${spi.n} Items, ${updates.length} Updates, ${Object.keys(mayorFx).length} Mayors, ${(JSON.stringify(out).length / 1e6).toFixed(2)} MB`);

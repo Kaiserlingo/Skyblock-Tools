@@ -5,7 +5,7 @@ name: Marktdaten aktualisieren
 # Die Website lädt sie von dort. Unter "Actions" auch manuell startbar.
 on:
   schedule:
-    - cron: "41 3 * * *"   # täglich 03:41 UTC
+    - cron: "41 3,9,15,21 * * *"   # alle 6 Stunden
   workflow_dispatch:
     inputs:
       limit:
@@ -40,4 +40,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tools/data_branch.sh publish out/market.json
+          tools/data_branch.sh publish out/market.json out/bazaar_stats.json

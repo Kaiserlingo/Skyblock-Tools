@@ -136,7 +136,7 @@ function signalsHTML(){
 }
 function flipsHTML(){
   if (!S.rows.length) return '<p class="loading">Bazaar wird geladen …</p>';
-  const f = filteredFlips(true).map(r => ({k: 'flip', id: r.id, name: r.name, pph: r.pph, sub: `${price(r.buyAt)} kaufen, ${price(r.sellAt)} verkaufen`}));
+  const f = filteredFlips(true).map(r => ({k: 'flip', id: r.id, name: r.name, pph: r.pphTyp, sub: `${price(r.buyAt)} kaufen, ${price(r.sellAt)} verkaufen`}));
   const c = filteredCrafts(true).map(r => ({k: 'craft', ri: r.ri, id: r.id, name: (r.cnt > 1 ? r.cnt + '× ' : '') + r.name, pph: r.pph, sub: 'Craft-Flip: ' + r.ingredients}));
   const list = f.concat(c).sort((a, b) => b.pph - a.pph).slice(0, 6);
   if (!list.length) return `<p class="note">Gerade passt kein Flip zur Strategie ${esc((PRESETS[S.set.preset] || {}).label || 'eigene')}. <a class="link" href="#bazaar/settings">Strategie ändern</a></p>`;

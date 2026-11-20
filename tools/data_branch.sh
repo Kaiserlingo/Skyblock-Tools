@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Hilfsskript für den Branch "data" (dort liegen market.json und prices.json).
 #   tools/data_branch.sh fetch <ordner>    holt den aktuellen Stand (oder legt einen leeren Ordner an)
-#   tools/data_branch.sh publish <datei>   ersetzt <datei> auf dem Branch, alle anderen Dateien bleiben
+#   tools/data_branch.sh publish <datei…>  ersetzt diese Dateien auf dem Branch, alle anderen bleiben
 # Beide Workflows schreiben unabhängig voneinander. Damit keiner die Datei des anderen
 # mit einem alten Stand überschreibt, wird direkt vor dem Push frisch geholt und nur gepusht,
 # wenn sich der Branch seitdem nicht geändert hat (--force-with-lease); sonst neuer Versuch.
@@ -13,11 +13,11 @@ case "$1" in
     git clone -q --depth 1 --branch data "$REPO" "$2" 2>/dev/null || mkdir -p "$2"
     ;;
   publish)
-    SRC="$(realpath "$2")"
+    shift; SRCS=(); for f in "$@"; do SRCS+=("$(realpath "$f")"); done
     for try in 1 2 3 4 5 6; do
       rm -rf _pub
       if git clone -q --depth 1 --branch data "$REPO" _pub 2>/dev/null; then OLD=$(git -C _pub rev-parse HEAD); else mkdir -p _pub; OLD=""; fi
-      cp "$SRC" _pub/
+      cp "${SRCS[@]}" _pub/
       cd _pub
       rm -rf .git && git init -q && git checkout -q -b data
       git add -A

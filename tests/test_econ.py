@@ -135,5 +135,24 @@ for trial in range(10):
 r = node("""const L=[{t:Date.UTC(2026,0,1),v:1},{t:Date.UTC(2026,0,5,2),v:5},{t:Date.UTC(2026,0,6,2),v:6}], R=[{t:Date.UTC(2026,0,4,12),v:40},{t:Date.UTC(2026,0,5,0),v:50},{t:Date.UTC(2026,0,5,10),v:51}];
   return E.mergeRecent(L,R,Date.UTC(2026,0,5)).map(p=>p.v);""")
 check('mergeRecent', 1.0, 1.0 if r == [1, 50, 51] else 0.0)
+# Spread-Statistik und Anteil-über-Schwelle
+import datetime as _dt
+pts = []; t0 = 1795000000000; rs = np.random.default_rng(11)
+for i in range(84):
+    b = 100 * (1 + .05 * math.sin(i / 7)) * (1 + rs.uniform(0, .01)); sp = rs.uniform(.01, .08); s_ = b / (1 + sp)
+    pts.append({'timestamp': _dt.datetime.fromtimestamp((t0 + i * 2 * 3600e3) / 1000, _dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S'),
+                'buy': b, 'sell': s_, 'maxBuy': b * 1.02, 'minBuy': b * .99, 'maxSell': s_ * 1.01, 'minSell': s_ * .98, 'buyMovingWeek': 1000 + i, 'sellMovingWeek': 2000})
+r = node(f"const st = E.spreadStats({json.dumps(pts)}, [], {t0 + 84 * 2 * 3600e3}); return {{st, a: [E.shareAbove(st.sq, 0.0), E.shareAbove(st.sq, 1), E.shareAbove(st.sq, st.sq[10]), E.shareAbove(st.sq, (st.sq[4] + st.sq[5]) / 2)]}};")
+st = r['st']; sp = np.array([p['buy'] / p['sell'] - 1 for p in pts])
+sig5 = lambda x: float(f'{x:.5g}')
+for k in range(21): check(f'sq{k}', sig5(np.quantile(sp, k / 20)), st['sq'][k])
+check('am', sig5(np.median([p['buy'] for p in pts])), st['am']); check('bm', sig5(np.median([p['sell'] for p in pts])), st['bm'])
+check('ra', sig5(np.median([(p['maxBuy'] - p['minBuy']) / p['buy'] for p in pts])), st['ra'])
+mid = [(p['buy'] + p['sell']) / 2 for p in pts]; t = [t0 + i * 2 * 3600e3 for i in range(84)]
+first = [m for m, x in zip(mid, t) if x < t[0] + DAY]; last = [m for m, x in zip(mid, t) if x > t[-1] - DAY]
+check('tr', sig5(np.mean(last) / np.mean(first) - 1), st['tr']); check('vt', sig5((1000 + 83 + 2000) / 3000 - 1), st['vt']); check('n', 84.0, float(st['n']))
+check('shareAbove 0', 1.0, r['a'][0]); check('shareAbove 1', 0.0, r['a'][1]); check('shareAbove median', .5, r['a'][2]); check('shareAbove zwischen', 1 - 4.5 / 20, r['a'][3])
+r = node("return E.spreadStats([{timestamp:'2026-01-01T00:00:00',buy:1,sell:1}], [], 0);"); check('zu wenige Punkte', None, r)
+
 print(f"geprüft: {checks}, Fehler: {len(fails)}")
 for f in fails: print('  ', f)
