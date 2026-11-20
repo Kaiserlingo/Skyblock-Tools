@@ -545,7 +545,8 @@ async function mountItem(){
   const enc = encodeURIComponent(id);
   try{
     if (k.bz){
-      const [h1, h14] = await Promise.all([getJSON(COFL + `bazaar/${enc}/history?start=${y}&end=${n}`, 30 * 60e3), getJSON(COFL + `bazaar/${enc}/history?start=${new Date(now - 6.9 * DAY).toISOString()}&end=${n}`, 5 * 60e3).catch(() => null)   // bis 7 Tage: 2-Stunden-Punkte]);
+      // 7-Tage-Abfrage: nur bis 7 Tage liefert SkyCofl 2-Stunden-Punkte
+      const [h1, h14] = await Promise.all([getJSON(COFL + `bazaar/${enc}/history?start=${y}&end=${n}`, 30 * 60e3), getJSON(COFL + `bazaar/${enc}/history?start=${new Date(now - 6.9 * DAY).toISOString()}&end=${n}`, 5 * 60e3).catch(() => null)]);
       I.h1 = bzPoints(h1); I.h7 = bzPoints(h14);
     } else if (k.ah){
       const [full, week, sold] = await Promise.allSettled([
