@@ -17,7 +17,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: data-branch
+  group: prices
   cancel-in-progress: false
 
 jobs:
@@ -36,7 +36,7 @@ jobs:
       - name: Auktionen auswerten
         run: node tools/build_prices.mjs prices.json pub/prices.json
       - name: Veröffentlichen
-        run: tools/data_branch.sh publish pub prices.json
+        run: tools/data_branch.sh publish prices.json
       - name: Nächsten Lauf planen
         if: always()
         run: |

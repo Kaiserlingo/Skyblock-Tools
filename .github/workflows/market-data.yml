@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: data-branch
+  group: market-data
   cancel-in-progress: false
 
 jobs:
@@ -40,5 +40,4 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tools/data_branch.sh fetch pub
-          tools/data_branch.sh publish pub out/market.json
+          tools/data_branch.sh publish out/market.json
