@@ -84,7 +84,7 @@ console.log(`Lade Verläufe für ${ids.length} Items …`);
 // Raster: die letzten DAYS vollen Tage bis gestern (UTC). Der lange Verlauf kommt als Tagespunkte,
 // die letzten 7 Tage in 2-Stunden-Punkten (SkyCofl schreibt die Tagespunkte erst mit Verzögerung).
 const END = today - DAY;
-const from = new Date(END - (DAYS + 2) * DAY).toISOString(), to = new Date(now).toISOString(), from7 = new Date(END - 6 * DAY).toISOString(), CUT = END - 5 * DAY;
+const from = new Date(END - (DAYS + 2) * DAY).toISOString(), to = new Date(now).toISOString(), from7 = new Date(now - 6.9 * DAY).toISOString(), CUT = END - 5 * DAY;   // SkyCofl liefert 2-Stunden-Punkte nur für Zeiträume bis 7 Tage
 const hist = await pool(ids, 4, async id => {
   const [a, b] = [await get(C + `bazaar/${encodeURIComponent(id)}/history?start=${from}&end=${to}`), await get(C + `bazaar/${encodeURIComponent(id)}/history?start=${from7}&end=${to}`).catch(() => [])];
   return {a, b};

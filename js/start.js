@@ -61,7 +61,7 @@ function signals(){
       const x = px.items[id]; if (x.b == null || !x.l5 || x.l5.length < 3 || x.n < 8 || x.b < 5e5 || x.v) continue;
       const next = x.l5[1], gain = next * (1 - M().ahFee(next)) - x.b;
       if (next / x.b - 1 >= .15 && gain > 0) out.push({type: 'ah', id, bz: false, strength: Math.min(6, 1 + Math.log10(gain / 1e5 + 1) * 2),
-        title: `Lowest BIN ${P(1 - x.b / next, false)} unter dem nächsten Angebot`,
+        title: `nächstes Angebot ${P(next / x.b - 1, false)} teurer`,
         text: `Kaufen für ${price(x.b)}, nächstes Angebot ${price(next)}. Nach Gebühren etwa ${fmt(gain)} Gewinn beim Weiterverkauf zum nächsten Preis. ${NF0.format(x.n)} BIN-Angebote. Prüf, ob sich die Exemplare unterscheiden.`});
     }
   }
