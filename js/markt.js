@@ -33,7 +33,7 @@ const K = {
   chart: null, timer: null,
   list: {q: '', mkt: 'all', sec: 'all', sort: 'to', dir: -1, page: 0, preset: null},
   idx: {range: 365, bands: true, marks: true, cmp: ''},
-  it: null, itRange: '1y', itBands: true, itMarks: true, mob: 'order', calc: {budget: 10e6, share: 10},
+  it: null, itTab: 'market', itRange: '1y', itBands: true, itMarks: true, mob: 'order', calc: {budget: 10e6, share: 10},
 };
 try{ Object.assign(K.calc, JSON.parse(localStorage.getItem('mk:calc') || '{}')); }catch{}
 
@@ -89,8 +89,9 @@ function loadPx(force){
     .then(j => { if (!j || !j.items) throw new Error('unvollständig'); const changed = !K.px || j.built !== K.px.built; K.px = j; K.pxErr = null; if (changed && K.mounted) pxChanged(); return j; })
     .catch(e => { K.pxErr = e.message; K.pxP = null; });
 }
-setInterval(() => { if (S.tool === 'markt' && !document.hidden) loadPx(true); }, 60e3);
+setInterval(() => { if ((S.tool === 'markt' || !S.tool) && !document.hidden) loadPx(true); }, 60e3);
 function pxChanged(){
+  if (!S.tool && window.Start){ Start.update(); return; }
   if (S.tool !== 'markt') return;
   if (K.tab === 'item'){ if (K.it && K.it.ready) drawItem(true); }
   else if (K.tab === 'items') drawList();
@@ -154,6 +155,9 @@ function render(tab){
   if (tab === 'item') return pageItem();
   if (tab === 'items') return pageItems();
   if (tab === 'updates') return pageUpdates();
+  if (tab === 'mayors') return pageShell('Mayors & Wahl', 'Mayor und Minister ändern alle 124 Stunden die Regeln. Hier steht, wer gerade regiert, wer die Wahl anführt und was unter jedem Mayor mit den Preisen passiert ist.', mayorsBody);
+  if (tab === 'calendar') return pageShell('Kalender & Events', 'Feste Ereignisse im SkyBlock-Jahr und laufende Firesales. Ereignisse ändern Angebot und Nachfrage auf Zeit.', () => `<div id="mk-cal">${calendarHTML()}</div>`);
+  if (tab === 'rank') return pageShell('Ranglisten', 'Die auffälligsten Bazaar-Items auf einen Blick, aus den Tagesdaten. Nur gut gehandelte Items. Klick ein Item an, um es zu analysieren.', rankBody);
   if (tab === 'method') return pageMethod();
   return pageStart();
 }
@@ -166,16 +170,23 @@ function mount(tab){
   if (tab === 'item'){ mountItem(); return; }
   Promise.all([needMD, K.hyP, K.liveP]).then(() => { if (K.tab === tab && S.tool === 'markt') redraw(); });
   if (tab === 'start') mountIndexChart();
-  clearInterval(K.timer); K.timer = setInterval(() => { if (S.tool === 'markt' && K.tab === 'start'){ const el = $('#mk-cal'); if (el) el.innerHTML = calendarHTML(); } }, 30e3);
+  clearInterval(K.timer); K.timer = setInterval(() => { if (S.tool === 'markt' && K.tab === 'calendar'){ const el = $('#mk-cal'); if (el) el.innerHTML = calendarHTML(); } }, 30e3);
 }
 function leave(){ K.mounted = false; clearInterval(K.timer); if (K.chart){ K.chart.destroy(); K.chart = null; } K.tab = null; K.it = null; }
 function update(){   // neue Bazaar-Daten (alle 20 s)
   if (K.tab === 'item'){ if (K.it && K.it.ready) drawItem(true); return; }
   if (K.tab === 'items') drawList();
 }
+// Einfache Seiten: Überschrift, Einleitung, Inhalt (der Inhalt wird bei neuen Daten neu gezeichnet)
+const BODIES = {};
+function pageShell(title, intro, body){
+  BODIES[K.tab || S.tab] = body;
+  return `<div class="mk"><h1 class="lead small">${title}</h1><p class="summary">${intro}</p><div id="mk-page">${body()}</div></div>`;
+}
 function redraw(){
   if (S.tool !== 'markt') return;
-  if (K.tab === 'start'){ const b = $('#mk-body'); if (b){ b.innerHTML = startBody(); } const l = $('#mk-lead'); if (l) l.innerHTML = startLead(); if (!K.chart) mountIndexChart(); else feedIndexChart(); }
+  if (BODIES[K.tab] && ['mayors', 'calendar', 'rank'].includes(K.tab)){ const v = $('#mk-page'); if (v) v.innerHTML = BODIES[K.tab](); return; }
+  if (K.tab === 'start'){ const b = $('#mk-body'); if (b){ b.innerHTML = startBody(); } const l = $('#mk-lead'); if (l) l.innerHTML = startLead(); const n = $('#mk-now'); if (n) n.innerHTML = nowStrip(); if (!K.chart) mountIndexChart(); else feedIndexChart(); }
   else if (K.tab === 'items') drawList();
   else if (K.tab === 'updates'){ const v = $('#mk-upd'); if (v) v.innerHTML = updatesBody(); }
   else if (K.tab === 'item' && K.it && K.it.ready) drawItem(false);
@@ -190,19 +201,33 @@ function mdNote(){
 function pageStart(){
   return `<div class="mk">
     <h1 class="lead small" id="mk-lead">${startLead()}</h1>
-    <p class="summary">Der SkyBlock-Preisindex fasst die Preise der umsatzstärksten Bazaar-Items zusammen, so wie ein Verbraucherpreisindex den Warenkorb.
-      Steigt er, wird alles teurer: Coins verlieren an Wert. <a class="link" href="#markt/method">So wird gerechnet</a></p>
+    <div id="mk-now">${nowStrip()}</div>
     <section class="mk-block">
       <header><h2>SkyBlock-Preisindex</h2>
         <div class="seg sm" role="group" aria-label="Zeitraum">${[[30, '30 Tage'], [90, '90 Tage'], [365, '1 Jahr']].map(([d, l]) => `<button data-mkrange="${d}" class="${K.idx.range === d ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <label class="chk"><input type="checkbox" data-mkopt="bands" ${K.idx.bands ? 'checked' : ''}> Mayor-Amtszeiten</label>
-        <label class="chk"><input type="checkbox" data-mkopt="marks" ${K.idx.marks ? 'checked' : ''}> Updates</label>
-        <label class="chk">Vergleich <select data-mkcmp>${['', ...SEC_ORDER].map(s => `<option value="${s}" ${K.idx.cmp === s ? 'selected' : ''}>${s ? secLabel(s) : 'keine Kategorie'}</option>`).join('')}</select></label>
+        <details class="mk-opts"><summary>Anzeige</summary><div>
+          <label class="chk"><input type="checkbox" data-mkopt="bands" ${K.idx.bands ? 'checked' : ''}> Mayor-Amtszeiten</label>
+          <label class="chk"><input type="checkbox" data-mkopt="marks" ${K.idx.marks ? 'checked' : ''}> Updates</label>
+          <label class="chk">Vergleich <select data-mkcmp>${['', ...SEC_ORDER].map(s => `<option value="${s}" ${K.idx.cmp === s ? 'selected' : ''}>${s ? secLabel(s) : 'keine Kategorie'}</option>`).join('')}</select></label>
+        </div></details>
       </header>
+      <p class="hint mk-idxlead">Fasst die Preise der umsatzstärksten Bazaar-Items zusammen, wie ein Verbraucherpreisindex den Warenkorb. Steigt er, verlieren Coins an Wert.</p>
       <div class="mk-chart" id="mk-idx"></div>
       <p class="hint" id="mk-idxnote">${mdNote()}</p>
     </section>
     <div id="mk-body">${startBody()}</div>
+  </div>`;
+}
+// Kurzfassung „Was gerade wichtig ist“ mit Links auf die Detailseiten
+function nowStrip(){
+  const md = K.md, m = curMayor(), now = Date.now(), ev = E.sbUpcoming(now, 6).filter(x => x.key !== 'mayor')[0], u = md && md.updates[0];
+  const end = m && m.term ? m.term.end : nextMayorChange(now);
+  const box = (href, k, v, s) => `<a class="mk-now" href="${href}"><span class="k">${k}</span><span class="v">${v}</span><span class="s">${s}</span></a>`;
+  return `<div class="mk-nowrow">
+    ${box('#markt/mayors', 'Mayor', m ? esc(m.name) + (m.minister ? ` <small>+ ${esc(m.minister.name)}</small>` : '') : '…', end ? 'Wechsel ' + until(end - now) : '')}
+    ${box('#markt/updates', 'Neuestes Update', u ? esc(u.title.replace(/^SkyBlock\s*/, '')) : '…', u ? fdate(u.date) + (u.spi.d1 != null ? ', Markt ' + P(u.spi.d1) + ' am Tag danach' : ', Wirkung noch nicht messbar') : '')}
+    ${box('#markt/calendar', ev && ev.running ? 'Läuft gerade' : 'Nächstes Event', ev ? esc(ev.name) : '…', ev ? (ev.running ? 'endet ' + until(ev.end - now) : until(ev.start - now)) : '')}
+    ${box('#markt/items', 'Items', K.px || S.rows.length ? NF0.format(universe().size) : '…', 'alle mit aktuellem Preis')}
   </div>`;
 }
 function secLabel(s){ return CAT.label(s); }
@@ -244,34 +269,21 @@ function startBody(){
   const movers = Object.entries(md.items).filter(([, o]) => o.liq && num(o.c7));
   const up = movers.slice().sort((a, b) => b[1].c7 - a[1].c7).slice(0, 5), dn = movers.slice().sort((a, b) => a[1].c7 - b[1].c7).slice(0, 5);
   const livePx = id => { const r = liveRow(id); return r && r.topSell ? `Instabuy ${price(r.topSell)}, Instasell ${price(r.topBuy)}` : ''; };
-  const u = md.updates[0], m = curMayor(), fx = m && md.mayorFx[m.name];
   const li = (id, sub, v, vs) => `<li data-mkitem="${esc(id)}">${itemCell(id, nm(id), sub)}<span class="v">${v}<small>${vs}</small></span></li>`;
   return `
-  <div class="tablewrap mk-sec"><table>
+  <h2 class="sec">Kategorien</h2>
+  <div class="tablewrap"><table class="mk-table">
     <thead><tr><th class="l nosort">Kategorie</th><th class="nosort">Items im Index</th><th class="nosort">7 Tage</th><th class="nosort">30 Tage</th><th class="nosort">1 Jahr</th></tr></thead>
     <tbody>
       <tr class="mk-total"><td class="l"><b>Gesamter Markt</b></td><td>${NF0.format(md.index.n)}</td><td>${PC(E.change(spi, 7))}</td><td>${PC(E.change(spi, 30))}</td><td>${PC(E.change(spi, spi.length - 1))}</td></tr>
-      ${secRows.map(r => `<tr data-mksec="${r.s}"><td class="l">${esc(secLabel(r.s))}</td><td>${NF0.format(r.n)}</td><td>${PC(r.c7)}</td><td>${PC(r.c30)}</td><td>${PC(r.c365)}</td></tr>`).join('')}
+      ${secRows.map(r => `<tr data-mksec="${r.s}" title="Alle Items dieser Kategorie"><td class="l">${esc(secLabel(r.s))}</td><td>${NF0.format(r.n)}</td><td>${PC(r.c7)}</td><td>${PC(r.c30)}</td><td>${PC(r.c365)}</td></tr>`).join('')}
     </tbody></table></div>
+  <h2 class="sec">Größte Bewegungen der letzten 7 Tage</h2>
   <div class="cols">
-    <section><header><h2>Politik: Mayor im Amt</h2><a class="link" href="#markt/updates">Alle Mayors</a></header>
-      ${m ? `<p class="mk-big">${esc(m.name)}${m.minister ? ` <span class="mut">mit Minister ${esc(m.minister.name)}</span>` : ''}</p>
-        <ul class="mk-perks">${m.perks.map(p => `<li><b>${esc(p.name)}</b>${p.d ? ` ${esc(p.d)}` : ''}</li>`).join('')}${m.minister && m.minister.perk ? `<li><b>${esc(m.minister.perk)}</b> (Minister)${m.minister.d ? ` ${esc(m.minister.d)}` : ''}</li>` : ''}</ul>
-        <p class="note">${m.term ? `Amtszeit bis ${fdt(m.term.end)} (${until(m.term.end - Date.now())}).` : (() => { const n = nextMayorChange(Date.now()); return n ? `Nächster Wechsel ${fdt(n)} (${until(n - Date.now())}).` : ''; })()}</p>
-        ${fx ? `<p class="note">In seinen ${fx.terms} Amtszeiten im letzten Jahr hat sich der Markt typischerweise um ${P(fx.spi)} bewegt (Median). Diese Items steigen unter ${esc(m.name)} typischerweise stärker als der Markt:</p>
-          <ul class="rank">${fx.top.slice(0, 3).map(r => li(r[0], `in ${r[2]} Amtszeiten, ${Math.round(r[3] * 100)} % davon gestiegen`, P(r[1]), 'gegenüber dem Markt')).join('')}</ul>` : ''}` : '<p class="loading">Lädt …</p>'}
-    </section>
-    <section><header><h2>Neuestes Update</h2><a class="link" href="#markt/updates">Alle Updates</a></header>
-      ${u ? `<p class="mk-big"><a class="link" href="${esc(u.link)}" target="_blank" rel="noopener">${esc(u.title)}</a> <span class="mut">${fdate(u.date)}</span></p>
-        ${u.spi.d1 == null ? `<p class="note">Die Wirkung ist ab ${fdate(u.date + 2 * DAY)} messbar, sobald SkyCofl die Tagesdaten hat.</p>` : `
-        <dl class="facts mk-3"><div><dt>Markt nach 1 Tag</dt><dd>${PC(u.spi.d1)}</dd></div><div><dt>nach 3 Tagen</dt><dd>${PC(u.spi.d3)}</dd></div><div><dt>nach 7 Tagen</dt><dd>${PC(u.spi.d7)}</dd></div></dl>
-        ${u.top.length ? `<ul class="rank">${u.top.slice(0, 3).map(r => li(r[0], 'gegenüber dem Markt, 7 Tage', P(r[1]), P(r[2]) + ' absolut')).join('')}</ul>` : `<p class="note">Die 7-Tage-Wirkung pro Item ist ab ${fdate(u.date + 8 * DAY)} messbar.</p>`}`}` : '<p class="loading">Lädt …</p>'}
-    </section>
-    <section><header><h2>Am stärksten gestiegen (7 Tage)</h2><button class="link" data-mkpreset="up7">Alle ansehen</button></header>
+    <section><header><h2>Gestiegen</h2><button class="link" data-mkpreset="up7">Alle ansehen</button></header>
       <ul class="rank">${up.map(([id, o]) => li(id, livePx(id), P(o.c7), '7 Tage')).join('')}</ul></section>
-    <section><header><h2>Am stärksten gefallen (7 Tage)</h2><button class="link" data-mkpreset="dn7">Alle ansehen</button></header>
+    <section><header><h2>Gefallen</h2><button class="link" data-mkpreset="dn7">Alle ansehen</button></header>
       <ul class="rank">${dn.map(([id, o]) => li(id, livePx(id), P(o.c7), '7 Tage')).join('')}</ul></section>
-    <section class="mk-wide"><header><h2>Kalender</h2><span class="mut" id="mk-sbnow"></span></header><div id="mk-cal">${calendarHTML()}</div></section>
   </div>`;
 }
 function calendarHTML(){
@@ -370,8 +382,8 @@ function drawList(){
     <p class="hint">Veränderungen über 7 Tage, 30 Tage und 1 Jahr gibt es für Bazaar-Items aus den Tagesdaten (${K.md ? 'Stand ' + fdate(K.md.days.to) : 'laden …'}). Für Auction-House-Items stehen Verlauf und Kennzahlen auf der Analyseseite.${my ? ' „Unter Mayor“: typische Veränderung (Median) in seinen Amtszeiten gegenüber dem Markt.' : ''}</p>`;
 }
 /* ---------- Updates & Mayors ---------- */
-function pageUpdates(){ return `<div class="mk"><h1 class="lead small">Wie Updates und Mayors den Markt bewegen</h1>
-  <p class="summary">Für jedes Update und jede Amtszeit wird gemessen, wie sich die Preise danach verändert haben. „Gegenüber dem Markt“ heißt: die Veränderung eines Items minus die Veränderung des Preisindex. So bleibt übrig, was am Item selbst lag. Ein Zusammenhang ist noch kein Beweis, dass das Update die Ursache war.</p>
+function pageUpdates(){ return `<div class="mk"><h1 class="lead small">Wie Updates den Markt bewegen</h1>
+  <p class="summary">Für jedes Update wird gemessen, wie sich die Preise danach verändert haben. „Gegenüber dem Markt“ heißt: die Veränderung eines Items minus die Veränderung des Preisindex. So bleibt übrig, was am Item selbst lag. Ein Zusammenhang ist noch kein Beweis, dass das Update die Ursache war.</p>
   <div id="mk-upd">${updatesBody()}</div></div>`; }
 function updatesBody(){
   const md = K.md; if (!md) return `<p class="loading">${K.mdErr ? esc(mdNote()) : 'Marktdaten werden geladen …'}</p>`;
@@ -381,7 +393,6 @@ function updatesBody(){
   const cand = K.election && K.election.current && K.election.current.candidates;
   const tot = cand ? cand.reduce((s, c) => s + (c.votes || 0), 0) : 0;
   return `
-  <h2 class="sec">Updates</h2>
   <div class="mk-upds">${md.updates.map(u => `<article class="mk-upd">
     <header><h3><a class="link" href="${esc(u.link)}" target="_blank" rel="noopener">${esc(u.title)}</a></h3><span class="mut">${fdate(u.date)}</span></header>
     ${u.spi.d1 == null ? `<p class="note">Noch zu frisch: Messbar ab ${fdate(u.date + 2 * DAY)}.</p>` : `
@@ -390,9 +401,22 @@ function updatesBody(){
     ${u.top.length ? `<p class="note">${NF0.format(u.big)} von ${NF0.format(u.n)} gut gehandelten Items haben sich in 7 Tagen um mehr als 10 % anders bewegt als der Markt.</p>
     <div class="two"><div><h4 class="mk-h4">Gestiegen</h4><ul class="rank">${u.top.slice(0, 5).map(r => li(r[0], P(r[1]), P(r[2]) + ' absolut')).join('')}</ul></div>
       <div><h4 class="mk-h4">Gefallen</h4><ul class="rank">${u.flop.slice(0, 5).map(r => li(r[0], P(r[1]), P(r[2]) + ' absolut')).join('')}</ul></div></div>` : ''}`}
-  </article>`).join('')}</div>
+  </article>`).join('')}</div>`;
+}
 
-  <h2 class="sec">Mayors</h2>
+function mayorsBody(){
+  const md = K.md; if (!md) return `<p class="loading">${K.mdErr ? esc(mdNote()) : 'Marktdaten werden geladen …'}</p>`;
+  const li = (id, a, b) => `<li data-mkitem="${esc(id)}">${itemCell(id, nm(id), esc(secLabel(catOf(id) || 'ODDITIES')))}<span class="v">${a}<small>${b}</small></span></li>`;
+  const sel = K.mayorSel && md.mayorFx[K.mayorSel] ? K.mayorSel : (curMayor() || {}).name;
+  const mf = md.mayorFx[sel], m = curMayor();
+  const cand = K.election && K.election.current && K.election.current.candidates;
+  const tot = cand ? cand.reduce((s, c) => s + (c.votes || 0), 0) : 0;
+  const end = m && m.term ? m.term.end : nextMayorChange(Date.now());
+  return `
+  ${m ? `<section class="mk-cur"><p class="mk-big">${esc(m.name)}${m.minister ? ` <span class="mut">mit Minister ${esc(m.minister.name)}</span>` : ''}</p>
+    <ul class="mk-perks">${m.perks.map(p => `<li><b>${esc(p.name)}</b>${p.d ? ` ${esc(p.d)}` : ''}</li>`).join('')}${m.minister && m.minister.perk ? `<li><b>${esc(m.minister.perk)}</b> (Minister)${m.minister.d ? ` ${esc(m.minister.d)}` : ''}</li>` : ''}</ul>
+    ${end ? `<p class="note">Amtszeit bis ${fdt(end)} (${until(end - Date.now())}).</p>` : ''}</section>` : ''}
+  <h2 class="sec">Was unter jedem Mayor passiert</h2>
   <p class="note mk-w">Jede Amtszeit dauert 124 Stunden. Gemessen wird der Ø-Preis in der Amtszeit gegenüber den 5 Tagen davor, im Vergleich zum Markt, als Median über alle Amtszeiten. Mayors wirken über ihre Perks: Mehr Drops oder mehr Fortune bedeuten mehr Angebot und meist fallende Preise, neue Aufgaben schaffen Nachfrage.</p>
   ${cand && cand.length ? `<div class="mk-vote"><h3 class="mk-h4">Laufende Wahl (Jahr ${K.election.current.year})</h3>${cand.slice().sort((a, b) => b.votes - a.votes).map(c => `<div class="mk-vrow"><span>${esc(c.name)}</span><i style="--w:${tot ? (c.votes / tot * 100).toFixed(1) : 0}%"></i><b>${tot ? NF1.format(c.votes / tot * 100) + ' %' : '–'}</b>${md.mayorFx[c.name] ? `<button class="link" data-mkmayor="${esc(c.name)}">Was passiert unter ${esc(c.name)}?</button>` : ''}</div>`).join('')}</div>` : ''}
   <div class="tablewrap"><table class="mk-table"><thead><tr><th class="l nosort">Mayor</th><th class="nosort">Amtszeiten im letzten Jahr</th><th class="nosort">Markt typisch</th><th class="l nosort">stärkste Kategorie</th><th class="l nosort">schwächste Kategorie</th></tr></thead><tbody>
@@ -406,6 +430,27 @@ function updatesBody(){
   <div class="tablewrap"><table class="mk-table"><thead><tr><th class="l nosort">Mayor</th><th class="l nosort">Minister</th><th class="l nosort">von</th><th class="l nosort">bis</th></tr></thead><tbody>
     ${md.terms.slice(-12).reverse().map(t => `<tr class="static"><td class="l">${esc(t.name)}</td><td class="l">${t.minister ? esc(t.minister.name) + (t.minister.perk ? ` <span class="mut">${esc(t.minister.perk)}</span>` : '') : '–'}</td><td class="l">${fdt(t.start)}</td><td class="l">${fdt(t.end)}</td></tr>`).join('')}
   </tbody></table></div>`;
+}
+/* ---------- Ranglisten ---------- */
+function rankBody(){
+  const md = K.md; if (!md) return `<p class="loading">${K.mdErr ? esc(mdNote()) : 'Marktdaten werden geladen …'}</p>`;
+  const rows = Object.entries(md.items).filter(([, o]) => o.liq).map(([id, o]) => ({id, o}));
+  const top = (key, dir, n = 8) => rows.filter(r => num(r.o[key])).sort((a, b) => (a.o[key] - b.o[key]) * dir).slice(0, n);
+  const m = curMayor(), mn = m && m.name;
+  const myRows = mn ? rows.filter(r => r.o.my && r.o.my[mn] && r.o.my[mn][1] >= 3) : [];
+  const li = (r, v, sub) => `<li data-mkitem="${esc(r.id)}">${itemCell(r.id, nm(r.id), sub)}<span class="v">${v}</span></li>`;
+  const box = (title, preset, list) => `<section><header><h2>${title}</h2>${preset ? `<button class="link" data-mkpreset="${preset}">Alle ansehen</button>` : ''}</header><ul class="rank">${list || '<li class="mut">Keine Daten.</li>'}</ul></section>`;
+  const cat = r => esc(secLabel(catOf(r.id) || r.o.s));
+  return `<div class="cols mk-ranks">
+    ${box('Gewinner 7 Tage', 'up7', top('c7', -1).map(r => li(r, PC(r.o.c7), cat(r))).join(''))}
+    ${box('Verlierer 7 Tage', 'dn7', top('c7', 1).map(r => li(r, PC(r.o.c7), cat(r))).join(''))}
+    ${box('Gewinner 30 Tage', 'up30', top('c30', -1).map(r => li(r, PC(r.o.c30), cat(r))).join(''))}
+    ${box('Verlierer 30 Tage', 'dn30', top('c30', 1).map(r => li(r, PC(r.o.c30), cat(r))).join(''))}
+    ${box('Stärkste Schwankung', 'vol', top('v30', -1).map(r => li(r, P(r.o.v30, false), 'pro Tag, ' + cat(r))).join(''))}
+    ${box('Ruhigste Preise', 'calm', top('v30', 1).map(r => li(r, P(r.o.v30, false), 'pro Tag, ' + cat(r))).join(''))}
+    ${mn ? box(`Steigen typischerweise unter ${esc(mn)}`, 'mayor', myRows.sort((a, b) => b.o.my[mn][0] - a.o.my[mn][0]).slice(0, 8).map(r => li(r, PC(r.o.my[mn][0]), `${r.o.my[mn][1]} Amtszeiten, gegenüber dem Markt`)).join('')) : ''}
+    ${mn ? box(`Fallen typischerweise unter ${esc(mn)}`, null, myRows.sort((a, b) => a.o.my[mn][0] - b.o.my[mn][0]).slice(0, 8).map(r => li(r, PC(r.o.my[mn][0]), `${r.o.my[mn][1]} Amtszeiten, gegenüber dem Markt`)).join('')) : ''}
+  </div><p class="hint">${mdNote()} Schwankung: Standardabweichung der täglichen Preisänderung in den letzten 30 Tagen.</p>`;
 }
 
 /* ---------- So wird gerechnet ---------- */
@@ -477,7 +522,7 @@ function itemHead(id){
   const cat = catOf(id);
   let px = '';
   if (k.bz && r && (r.topBuy || r.topSell)) px = `<dl class="figures mk-fig"><div><dt>Instabuy</dt><dd class="amber">${price(r.topSell)}</dd></div><div><dt>Instasell</dt><dd class="pos">${price(r.topBuy)}</dd></div><div><dt>Spread</dt><dd>${r.topBuy && r.topSell ? P((r.topSell - r.topBuy) / r.topSell, false) : '–'}</dd></div><div><dt>Umsatz pro Tag</dt><dd>${fmt(((r.wBuy || 0) + (r.wSell || 0)) * (r.topBuy || r.topSell) / 7)}</dd></div></dl>
-    <p class="hint mk-src">Live aus dem Bazaar, Stand ${new Date(S.lastUpdated).toLocaleTimeString('de-AT')}. Dieselben Preise wie im Bazaar Flipper.</p>`;
+    <p class="hint mk-src">Live aus dem Bazaar, Stand ${new Date(S.lastUpdated).toLocaleTimeString('de-AT')}.</p>`;
   else if (k.ah){
     const s = I && I.ah && I.ah.sold;
     px = `<dl class="figures mk-fig"><div><dt>Lowest BIN</dt><dd class="amber">${x && x.b != null ? price(x.b) : '–'}</dd></div><div><dt>Zweitgünstigster BIN</dt><dd>${x && x.l5 && x.l5[1] != null ? price(x.l5[1]) : '–'}</dd></div><div><dt>BIN-Angebote</dt><dd>${x ? NF0.format(x.n || 0) : '–'}</dd></div><div><dt>Verkäufe pro Tag</dt><dd>${s && s.perDay != null ? NF1.format(s.perDay) : '–'}</dd></div></dl>
@@ -486,7 +531,7 @@ function itemHead(id){
   }
   return `<div class="ahead"><div><h1>${esc(nm(id))}</h1>
     <p class="sub">${[esc(id), tier, cat ? esc(secLabel(cat)) : '', k.bz ? 'Bazaar' : k.ah ? 'Auction House' : k.known ? 'nicht handelbar' : ''].filter(Boolean).join(', ')}</p></div>
-    <div class="btnrow"><button class="btn ghost" data-mkcopy="${esc(nm(id))}">Name kopieren</button>${k.bz ? `<a class="btn ghost" href="#bazaar/item/${encodeURIComponent(id)}">Im Flipper öffnen</a>` : ''}</div></div>${px}`;
+    <div class="btnrow"><button class="btn ghost" data-mkcopy="${esc(nm(id))}">Name kopieren</button></div></div>${px}`;
 }
 async function mountItem(){
   const id = S.itemId, I = K.it = {id, ready: false, err: [], series: {}};
@@ -620,14 +665,18 @@ function drawItem(liveOnly){
   }
   body.innerHTML = `${I.err.length ? `<div class="banner warnb">Ein Teil der Daten konnte nicht geladen werden (${esc(I.err[0])}). Die übrigen Zahlen stimmen.</div>` : ''}
     ${glanceHTML(I)}
-    <h2 class="mk-part">Volkswirtschaft</h2>
-    <div class="ana-grid">${[supplyDemandHTML(I), elasticityHTML(I), corridorHTML(I), inflationHTML(I), structureHTML(I), seasonHTML(I), politicsHTML(I), updatesItemHTML(I)].join('')}</div>
-    <h2 class="mk-part">Betriebswirtschaft</h2>
-    <div class="ana-grid">${[makeOrBuyHTML(I), contributionHTML(I), flipHTML(I), riskHTML(I), investHTML(I), valuationHTML(I), lifecycleHTML(I)].join('')}</div>
-    <h2 class="mk-part">Wertschöpfungskette</h2>
-    ${chainHTML(I)}
+    <nav class="mk-itabs" role="tablist" aria-label="Analyse">${ITABS.map(t => `<button role="tab" data-mitab="${t.id}" class="${K.itTab === t.id ? 'on' : ''}" aria-selected="${K.itTab === t.id}">${t.label}<small>${t.sub}</small></button>`).join('')}</nav>
+    <div class="mk-itab">${(ITABS.find(t => t.id === K.itTab) || ITABS[0]).html(I)}</div>
     <p class="hint">${mdNote()} ${I.k.bz ? 'Live-Werte aus dem Bazaar, Verläufe von SkyCofl.' : 'Lowest BIN aus allen Hypixel-Auktionen, Verläufe und Verkäufe von SkyCofl.'} Prices provided by SkyCofl.</p>`;
 }
+// Unterteilung der Item-Analyse
+const ITABS = [
+  {id: 'market', label: 'Angebot & Nachfrage', sub: 'Volkswirtschaft', html: I => `<div class="ana-grid">${[supplyDemandHTML(I), structureHTML(I), elasticityHTML(I), corridorHTML(I)].join('')}</div>`},
+  {id: 'trend', label: 'Entwicklung', sub: 'Inflation, Mayors, Updates', html: I => `<div class="ana-grid">${[inflationHTML(I), politicsHTML(I), updatesItemHTML(I), seasonHTML(I), lifecycleHTML(I)].join('')}</div>`},
+  {id: 'money', label: 'Kosten & Gewinn', sub: 'Betriebswirtschaft', html: I => `<div class="ana-grid">${[makeOrBuyHTML(I), contributionHTML(I), flipHTML(I)].join('')}</div>`},
+  {id: 'risk', label: 'Risiko & Bewertung', sub: 'Halten oder nicht?', html: I => `<div class="ana-grid">${[valuationHTML(I), riskHTML(I), investHTML(I)].join('')}</div>`},
+  {id: 'chain', label: 'Herstellung', sub: 'Rezept und Verwendung', html: I => chainHTML(I)},
+];
 const card = (title, sbText, inner, wide) => `<section class="${wide ? 'wide' : ''}"><h2>${title}</h2>${inner}${sbText ? `<p class="mk-sb"><b>In SkyBlock:</b> ${sbText}</p>` : ''}</section>`;
 const facts = rows => `<dl class="facts">${rows.filter(Boolean).map(([k, v]) => `<div><dt>${k}</dt><dd>${v}</dd></div>`).join('')}</dl>`;
 
@@ -871,7 +920,8 @@ document.addEventListener('click', e => {
   if ((el = q('[data-mkclear]'))){ K.list.q = ''; const s = $('#msearch'); if (s){ s.value = ''; s.parentElement.classList.remove('has'); s.focus(); } drawList(); return; }
   if ((el = q('[data-mkrange]'))){ K.idx.range = +el.dataset.mkrange; document.querySelectorAll('[data-mkrange]').forEach(b => b.classList.toggle('on', b === el)); feedIndexChart(); return; }
   if ((el = q('[data-mirange]'))){ K.itRange = el.dataset.mirange; document.querySelectorAll('[data-mirange]').forEach(b => b.classList.toggle('on', b === el)); feedItemChart(); return; }
-  if ((el = q('[data-mkmayor]'))){ K.mayorSel = el.dataset.mkmayor; const v = $('#mk-upd'); if (v){ v.innerHTML = updatesBody(); const m = $('.mk-mf'); if (m) m.scrollIntoView({block: 'nearest'}); } return; }
+  if ((el = q('[data-mkmayor]'))){ K.mayorSel = el.dataset.mkmayor; redraw(); const m = $('.mk-mf'); if (m) m.scrollIntoView({block: 'nearest', behavior: 'smooth'}); return; }
+  if ((el = q('[data-mitab]'))){ K.itTab = el.dataset.mitab; drawItem(true); return; }
   if ((el = q('[data-mkmob]'))){ K.mob = el.dataset.mkmob; drawItem(false); return; }
   if ((el = q('[data-mkcopy]'))){ const txt = el.dataset.mkcopy; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => { el.textContent = 'Kopiert'; setTimeout(() => el.textContent = 'Name kopieren', 1500); }).catch(() => {}); return; }
 });
@@ -900,6 +950,10 @@ document.addEventListener('keydown', e => {
 });
 
 function hubMeta(){ return ''; }
-window.Markt = {render, mount, update, leave, pageTitle, hubMeta, _K: K, _analyze: analyze, _bzPoints: bzPoints, _ahPoints: ahPoints};
+function openCategory(k){ K.list.sec = k; K.list.preset = null; K.list.q = ''; K.list.page = 0; nav('markt/items'); }
+// Für die Startseite (oberste Ebene): Daten laden und lesen, ohne die Seiten der Markt-Analyse
+function ensure(){ return Promise.allSettled([loadMD(), loadPx(), loadLive(), loadHy().then(() => loadColl()), loadCat()]); }
+function data(){ const m = curMayor(); return {md: K.md, px: K.px, pxErr: K.pxErr, mdErr: K.mdErr, mayor: m, mayorEnd: m && m.term ? m.term.end : nextMayorChange(Date.now()), election: K.election, fires: K.fires, pxAge: pxAge()}; }
+window.Markt = {render, mount, update, leave, pageTitle, hubMeta, ensure, data, nm, catOf, secLabel, universe, ahFee, openCategory, _K: K, _analyze: analyze, _bzPoints: bzPoints, _ahPoints: ahPoints};
 if (S.tool === 'markt') renderMain(true);
 })();

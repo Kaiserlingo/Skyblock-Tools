@@ -6,29 +6,45 @@
    ========================================================= */
 const BAZAAR_TABS = [
   {id:'overview', label:'Übersicht'},
-  {id:'flips',    label:'Flips'},
+  {id:'flips',    label:'Bazaar-Flips'},
   {id:'crafts',   label:'Craft-Flips'},
   {id:'npc',      label:'NPC-Flips'},
-  {id:'market',   label:'Markt'},
+  {id:'market',   label:'Alle Bazaar-Items'},
   {id:'watch',    label:'Watchlist'},
-  {id:'settings', label:'Einstellungen'},
+  {id:'settings', label:'Strategie & Filter'},
+];
+// Seitenmenü der Bereiche: Gruppen mit ihren Seiten
+const BAZAAR_MENU = [
+  {label:'Überblick', items:['overview']},
+  {label:'Flips finden', items:['flips', 'crafts', 'npc']},
+  {label:'Markt beobachten', items:['market', 'watch']},
+  {label:'Einrichten', items:['settings']},
 ];
 const MARKT_TABS = [
-  {id:'start',   label:'Übersicht'},
-  {id:'items',   label:'Alle Items'},
-  {id:'updates', label:'Updates & Mayors'},
-  {id:'method',  label:'So wird gerechnet'},
+  {id:'start',    label:'Marktlage'},
+  {id:'items',    label:'Alle Items'},
+  {id:'rank',     label:'Ranglisten'},
+  {id:'updates',  label:'Updates'},
+  {id:'mayors',   label:'Mayors & Wahl'},
+  {id:'calendar', label:'Kalender & Events'},
+  {id:'method',   label:'So wird gerechnet'},
+];
+const MARKT_MENU = [
+  {label:'Überblick', items:['start']},
+  {label:'Items', items:['items', 'rank']},
+  {label:'Was den Markt bewegt', items:['updates', 'mayors', 'calendar']},
+  {label:'Hilfe', items:['method']},
 ];
 // Werkzeuge mit eigener Oberfläche (render/mount/update/leave) liegen in eigenen Dateien, z. B. js/markt.js
 const lazy = name => (fn, fallback) => (...a) => window[name] && window[name][fn] ? window[name][fn](...a) : fallback;
-const M = lazy('Markt');
+const M = lazy('Markt'), ST = lazy('Start');
 const TOOLS = [
   {id:'bazaar', title:'Bazaar Flipper',
    desc:'Live-Flips mit Buy-Orders, Craft-Flips nur über den Bazaar, NPC-Flips, Marktübersicht und Preis-Alarme.',
-   tabs: BAZAAR_TABS, defaultTab:'overview'},
+   tabs: BAZAAR_TABS, menu: BAZAAR_MENU, defaultTab:'overview'},
   {id:'markt', title:'Markt-Analyse',
    desc:'Jedes SkyBlock-Item volks- und betriebswirtschaftlich durchleuchtet: Preis, Angebot und Nachfrage, Elastizität, Kosten, Risiko. Dazu, wie Updates und Mayors den Markt bewegen.',
-   tabs: MARKT_TABS, defaultTab:'start',
+   tabs: MARKT_TABS, menu: MARKT_MENU, defaultTab:'start',
    render: M('render', '<p class="loading">Wird geladen …</p>'), mount: M('mount'), update: M('update'), leave: M('leave'), pageTitle: M('pageTitle', 'Markt-Analyse'), meta: M('hubMeta', '')},
 ];
 const TOOL = Object.fromEntries(TOOLS.map(t => [t.id, t]));
@@ -608,20 +624,29 @@ function renderTop(){
   const t = S.tool && TOOL[S.tool];
   $('#top').innerHTML = `<div class="bar">
       <a class="wordmark" href="#" data-nav="">SkyBlock Tools</a>
-      ${t ? `<span class="sep">/</span><span class="toolname">${t.title}</span>` : ''}
+      <nav class="mainnav" aria-label="Bereiche">
+        <a href="#" data-nav="" class="${!t ? 'on' : ''}">Start</a>
+        ${TOOLS.map(x => `<a href="#${x.id}" data-nav="${x.id}" class="${t && t.id === x.id ? 'on' : ''}">${x.title}</a>`).join('')}
+      </nav>
       <div class="spacer"></div>
       ${statusEl()}
       <button class="btn ghost themebtn" data-act="theme">${themeBtnInner()}</button>
-      ${t && t.id === 'bazaar' ? `<button class="btn ghost" id="pauseBtn">${S.paused ? 'Fortsetzen' : 'Pausieren'}</button><button class="btn" id="refreshBtn">Aktualisieren</button>` : ''}
-    </div>
-    ${t ? '<nav class="tabs" id="tabs"></nav>' : ''}`;
+    </div>`;
+  document.body.classList.toggle('in-area', !!t);
   renderTabs(); tick();
 }
+// Seitenmenü des aktiven Bereichs (Gruppen, Zähler, beim Flipper Pausieren/Aktualisieren)
 function renderTabs(){
-  const el = $('#tabs'); if (!el) return;
-  const t = TOOL[S.tool];
-  const counts = S.tool !== 'bazaar' ? {} : S.rows.length ? {flips: filteredFlips(true).length, crafts: filteredCrafts(true).length, watch: S.watch.length} : {watch: S.watch.length};
-  el.innerHTML = t.tabs.map(x => `<button class="${S.tab === x.id ? 'on' : ''}" data-tab="${x.id}">${x.label}${counts[x.id] ? `<span class="n">${counts[x.id]}</span>` : ''}</button>`).join('');
+  const el = $('#side'); if (!el) return;
+  const t = S.tool && TOOL[S.tool];
+  if (!t){ el.innerHTML = ''; return; }
+  const counts = S.tool !== 'bazaar' ? {} : S.rows.length ? {flips: filteredFlips(true).length, crafts: filteredCrafts(true).length, npc: S.rows.filter(r => r.npc > 0 && r.npcOrder > 0 && liquid(r)).length, watch: S.watch.length} : {watch: S.watch.length};
+  const label = id => (t.tabs.find(x => x.id === id) || {}).label || id;
+  const cur = S.tab === 'item' ? (S.returnTo || t.defaultTab) : S.tab;
+  el.innerHTML = `<p class="side-title">${t.title}</p>
+    ${t.menu.map(g => `<div class="side-group"><p class="side-h">${g.label}</p>
+      ${g.items.map(id => `<a href="#${t.id}/${id}" data-tab="${id}" class="${cur === id ? 'on' : ''}">${label(id)}${counts[id] ? `<span class="n">${NF0.format(counts[id])}</span>` : ''}</a>`).join('')}</div>`).join('')}
+    ${t.id === 'bazaar' ? `<div class="side-actions"><button class="btn ghost sm" id="pauseBtn">${S.paused ? 'Fortsetzen' : 'Pausieren'}</button><button class="btn sm" id="refreshBtn">Aktualisieren</button></div>` : ''}`;
 }
 function tick(){
   const dot = $('#dot'), st = $('#statusTxt');
@@ -651,7 +676,10 @@ function renderMain(force){
   if (!force && S.tool && S.tab === 'item' && S.achart && S.byId[S.itemId]){ updateAnalysis(); renderTabs(); return; }
   const wasSearch = a && a.id === 'search', pos = wasSearch ? a.selectionStart : 0;
   let html;
-  if (!S.tool){ html = pageHub(); document.title = 'SkyBlock Tools'; }
+  if (!S.tool){
+    if (window.Start){ if (!force && Start.update){ Start.update(); return; } document.title = 'SkyBlock Tools'; $('#view').innerHTML = Start.render(); renderTabs(); Start.mount(); return; }
+    html = pageHub(); document.title = 'SkyBlock Tools';
+  }
   else {
     const t = TOOL[S.tool], tab = t.tabs.find(x => x.id === S.tab);
     document.title = (S.tab === 'item' ? (S.byId[S.itemId] ? S.byId[S.itemId].name : pretty(S.itemId)) + ' – Analyse' : tab.label) + ' – ' + t.title;
@@ -1588,7 +1616,7 @@ document.addEventListener('click', e => {
   if ((el = q('[data-star]'))){ e.stopPropagation(); toggleWatch(el.dataset.star); renderMain(true); rerenderModal(); return; }
   if ((el = q('[data-delalert]'))){ e.stopPropagation(); S.alerts.splice(+el.dataset.delalert, 1); save('alerts', S.alerts); renderMain(true); rerenderModal(); return; }
   if ((el = q('[data-nav]'))){ nav(el.dataset.nav); return; }
-  if ((el = q('[data-tab]'))){ closeDetail(); nav(S.tool + '/' + el.dataset.tab); return; }
+  if ((el = q('[data-tab]'))){ e.preventDefault(); closeDetail(); nav(S.tool + '/' + el.dataset.tab); return; }
   if ((el = q('[data-preset]'))){ applyPreset(el.dataset.preset); return; }
   if ((el = q('[data-coinset]'))){ const [k, v] = el.dataset.coinset.split(':'); setSetting(k, +v); refreshControls(); return; }
   if ((el = q('[data-setv]'))){ const v = el.dataset.val, k = el.dataset.setv; setSetting(k, isNaN(+v) ? v : +v); refreshControls(); return; }

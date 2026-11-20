@@ -20,13 +20,13 @@ async function get(url, tries = 5){
 }
 // Alle Seiten müssen zum selben Stand gehören, sonst fehlen oder doppeln sich Auktionen
 async function scan(){
-  for (let attempt = 0; attempt < 4; attempt++){
+  for (let attempt = 0; attempt < 7; attempt++){
     const p0 = await get(H + 'auctions?page=0');
     const rest = [];
     for (let i = 1; i < p0.totalPages; i += 8) rest.push(...await Promise.all(Array.from({length: Math.min(8, p0.totalPages - i)}, (_, k) => get(H + 'auctions?page=' + (i + k)))));
     const pages = [p0, ...rest], stamps = new Set(pages.map(p => p.lastUpdated));
     if (stamps.size === 1) return {pages, lastUpdated: p0.lastUpdated, total: p0.totalAuctions};
-    console.log('Stand hat sich während des Abrufs geändert, neuer Versuch …'); await sleep(8000);
+    console.log('Stand hat sich während des Abrufs geändert, neuer Versuch …'); await sleep(4000);
   }
   throw new Error('kein einheitlicher Stand der Auktionen');
 }
