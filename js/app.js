@@ -1171,7 +1171,7 @@ function renderDetail(update){
     <div id="dRel">${relDetail(r)}</div>
     <section class="block">
       <header><h3>Preisverlauf</h3><span class="legend"><span class="l-sell">Instabuy</span><span class="l-buy">Instasell</span></span><div class="spacer"></div>
-        ${rangeSeg('mrange', chartPrefs.mrange, ['1h','24h','7d','local'])}</header>
+        ${rangeSeg('mrange', chartPrefs.mrange, ['1h','24h','7d','30d','1y','all','local'])}</header>
       <div class="mchart" id="mchart"></div>
       <p class="hint" id="msrc"></p>
     </section>
@@ -1235,6 +1235,9 @@ const RANGES = {
   '24h':   {label: '24 h',    path: '/history/day',  span: 24*HOUR},
   '7d':    {label: '7 Tage',  path: '/history/week', span: 7*24*HOUR},
   '30d':   {label: '30 Tage', days: 30,              span: 30*24*HOUR},
+  '90d':   {label: '90 Tage', days: 90,              span: 90*24*HOUR},
+  '1y':    {label: '1 Jahr',  days: 365,             span: 365*24*HOUR},
+  'all':   {label: 'Alles',   start: '2019-06-01T00:00:00Z', span: Infinity},
   'local': {label: 'Browser', local: true},
 };
 const chartPrefs = Object.assign({mrange: '24h', arange: '24h', hi: true, lo: true, spread: true, volume: true, sma: false, ema: false, bb: false}, load('chartPrefs', {}));
@@ -1284,8 +1287,8 @@ async function loadHistory(id, range){
   if (R.local) return {data: localSeries(id), source: 'local'};
   const key = id + '|' + range, c = histCache[key];
   if (c && Date.now() - c.at < 120e3) return {data: cloneSeries(c.data), source: 'cofl'};
-  const url = COFL + encodeURIComponent(id) + (R.days
-    ? `/history?start=${new Date(Date.now() - R.days * 864e5).toISOString()}&end=${new Date().toISOString()}`
+  const url = COFL + encodeURIComponent(id) + (R.days || R.start
+    ? `/history?start=${R.start || new Date(Date.now() - R.days * 864e5).toISOString()}&end=${new Date().toISOString()}`
     : R.path);
   try{
     const r = await fetch(url);
@@ -1366,6 +1369,7 @@ PAGES.item = function(){
     <header class="ahead">
       <div><h1>${esc(r.name)}</h1><p class="sub"><i class="rar" style="--rc:${rarityColor(id)}"></i>${esc(id)}${S.tiers[id] ? ', ' + esc(title(S.tiers[id])) : ''}</p></div>
       <div class="btnrow">
+        <a class="btn" href="#markt/item/${encodeURIComponent(id)}">In der Markt-Analyse öffnen</a>
         <button class="btn ghost" data-act="copy" data-name="${esc(r.name)}">Name kopieren</button>
         <button class="btn" data-star="${esc(id)}">${watched ? 'Auf der Watchlist ★' : 'Auf die Watchlist ☆'}</button>
       </div>
@@ -1375,7 +1379,7 @@ PAGES.item = function(){
 
     <section class="ana-chart">
       <div class="ctrl">
-        ${rangeSeg('arange', chartPrefs.arange, ['1h','24h','7d','30d','local'])}
+        ${rangeSeg('arange', chartPrefs.arange, ['1h','24h','7d','30d','90d','1y','all','local'])}
         <div class="checks">
           ${[['hi','Instabuy'],['lo','Instasell'],['spread','Spread'],['volume','Volumen']].map(([k,l]) => `<label class="chk k-${k}"><input type="checkbox" data-ind="${k}" ${chartPrefs[k] ? 'checked' : ''}>${l}</label>`).join('')}
           <span class="vsep"></span>

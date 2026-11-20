@@ -531,7 +531,7 @@ function itemHead(id){
   }
   return `<div class="ahead"><div><h1>${esc(nm(id))}</h1>
     <p class="sub">${[esc(id), tier, cat ? esc(secLabel(cat)) : '', k.bz ? 'Bazaar' : k.ah ? 'Auction House' : k.known ? 'nicht handelbar' : ''].filter(Boolean).join(', ')}</p></div>
-    <div class="btnrow"><button class="btn ghost" data-mkcopy="${esc(nm(id))}">Name kopieren</button></div></div>${px}`;
+    <div class="btnrow">${k.bz ? `<a class="btn primary" href="#bazaar/item/${encodeURIComponent(id)}">Im Bazaar Flipper öffnen</a>` : ''}<button class="btn ghost" data-mkcopy="${esc(nm(id))}">Name kopieren</button></div></div>${px}`;
 }
 async function mountItem(){
   const id = S.itemId, I = K.it = {id, ready: false, err: [], series: {}};
@@ -763,14 +763,22 @@ function marketPrice(I){
   return null;
 }
 function corridorHTML(I){
-  const h = K.hy && K.hy[I.id], npc = h && h.npc_sell_price, c = craftResult(I, 'order'), mp = marketPrice(I);
-  const rows = [['NPC-Verkaufspreis (Untergrenze)', npc ? price(npc) : 'keiner'], ['Herstellkosten per Buy-Order (Obergrenze)', c ? price(c.craft) : 'kein Bazaar-Rezept'],
+  const h = K.hy && K.hy[I.id], npc = h && h.npc_sell_price, mp = marketPrice(I);
+  const co = craftResult(I, 'order'), ci = craftResult(I, 'insta');
+  // Verkaufserlös nach Gebühr: Bazaar-Steuer bzw. Auction-House-Gebühr
+  const net = p => p == null ? null : I.k.bz ? p * (1 - BZ_TAX()) : p * (1 - ahFee(p));
+  const rows = [['NPC-Verkaufspreis (Untergrenze)', npc ? price(npc) : 'keiner'],
+    ['Craft-Kosten, Zutaten per Instabuy (harte Obergrenze)', ci ? price(ci.craft) : 'kein Bazaar-Rezept'],
+    ['Craft-Kosten, Zutaten per Buy-Order (weiche Obergrenze)', co ? price(co.craft) : 'kein Bazaar-Rezept'],
     I.k.bz ? ['Marktpreis jetzt (Instasell bis Instabuy)', mp ? `${price(mp.sell)} bis ${price(mp.buy)}` : '–'] : ['Lowest BIN jetzt', mp ? price(mp.buy) : '–']];
   let verdict = '';
+  const sellNow = I.k.bz ? mp && mp.sell : mp && mp.buy;      // sofort verkaufen: Instasell bzw. knapp unter Lowest BIN
+  const sellWait = mp && mp.buy;                              // mit Geduld: Sell-Offer am Instabuy-Preis bzw. Lowest BIN
   if (mp && npc && mp.buy && mp.buy < npc) verdict = `<p class="mk-alert">Der Kaufpreis liegt unter dem NPC-Preis: kaufen und an den NPC verkaufen bringt ${price(npc - mp.buy)} pro Stück. Solche Lücken schließen sich meist schnell.</p>`;
-  else if (mp && c && mp.sell && mp.sell * (1 - BZ_TAX()) > c.craft) verdict = `<p class="mk-alert">Herstellen ist billiger als der Preis, den Käufer gerade zahlen: ${price(mp.sell * (1 - BZ_TAX()) - c.craft)} pro Stück nach Steuer. Das zieht neues Angebot an.</p>`;
-  else if (mp && (npc || c)) verdict = `<p class="note">Der Preis liegt im Korridor${npc ? `, ${P(mp.sell / npc - 1, false)} über der Untergrenze` : ''}${c ? `, ${mp.buy <= c.craft ? P(1 - mp.buy / c.craft, false) + ' unter den Herstellkosten' : P(mp.buy / c.craft - 1, false) + ' über den Herstellkosten'}` : ''}.</p>`;
-  return card('Preisuntergrenze und Obergrenze', 'Unter den NPC-Preis fällt ein Item nicht lange, weil dann jeder an den NPC verkauft. Über die Herstellkosten steigt es nicht lange, weil dann mehr Spieler craften. Dazwischen bewegt sich der Markt.', facts(rows) + verdict);
+  else if (ci && sellNow && net(sellNow) > ci.craft) verdict = `<p class="mk-alert">Sofort-Arbitrage: Zutaten per Instabuy kaufen, craften und sofort verkaufen bringt ${price(net(sellNow) - ci.craft)} pro Stück nach Gebühr. Solche Lücken werden schnell ausgenutzt, der Preis fällt meist bald.</p>`;
+  else if (co && sellWait && net(sellWait) > co.craft) verdict = `<p class="note">Craften mit Geduld lohnt: Zutaten per Buy-Order kaufen und ${I.k.bz ? 'per Sell-Offer' : 'zum Lowest BIN'} verkaufen bringt ${price(net(sellWait) - co.craft)} pro Stück nach Gebühr (${P(net(sellWait) / co.craft - 1, false)}). Das zieht langsam neues Angebot an und drückt den Preis Richtung Craft-Kosten.</p>`;
+  else if (mp && (npc || co)) verdict = `<p class="note">Der Preis liegt im Korridor${npc && mp.sell ? `, ${P(mp.sell / npc - 1, false)} über der Untergrenze` : ''}${co && sellWait ? `, nach Gebühr ${P(1 - net(sellWait) / co.craft, false)} unter den Craft-Kosten mit Buy-Orders` : ''}. Craften lohnt sich gerade nicht.</p>`;
+  return card('Preisuntergrenze und Obergrenze', 'Unter den NPC-Preis fällt ein Item nicht lange, weil dann jeder an den NPC verkauft. Nach oben begrenzt das Craften: Liegen die Craft-Kosten mit Instabuy unter dem Sofort-Verkaufspreis, ist das risikofreier Gewinn und wird sofort ausgenutzt (harte Grenze). Mit Buy-Orders ist Craften billiger, braucht aber Zeit, bis die Orders gefüllt sind (weiche Grenze).', facts(rows) + verdict);
 }
 
 /* --- Inflation --- */
