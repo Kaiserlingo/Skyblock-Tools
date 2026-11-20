@@ -588,7 +588,7 @@ function feedItemChart(){
   let pts = r === '7d' ? I.h7 : r === 'all' ? I.hAll : I.h1;
   if (r === 'all' && !I.hAll && I.k.bz){
     ch.empty = 'Lädt …'; ch.setData({t: []});
-    getJSON(COFL + `bazaar/${encodeURIComponent(I.id)}/history?start=2019-06-01T00:00:00Z&end=${new Date().toISOString()}`, 60 * 60e3)
+    coflAll(I.id)
       .then(h => { if (K.it !== I) return; I.hAll = bzPoints(h); feedItemChart(); }).catch(() => { ch.empty = 'Konnte nicht geladen werden'; ch.setData({t: []}); });
     return;
   }

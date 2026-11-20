@@ -1282,6 +1282,27 @@ function localSeries(id, span){
   }
   return d;
 }
+/* Gesamter Bazaar-Verlauf: SkyCofl liefert höchstens 2000 Tagespunkte pro Anfrage (≈ 5,5 Jahre).
+   Ist die Antwort voll, wird der Zeitraum davor nachgeladen, bis nichts mehr kommt. Cache 1 h. */
+const allHistCache = {};
+async function coflAll(id){
+  const c = allHistCache[id];
+  if (c && Date.now() - c.at < HOUR) return c.arr;
+  const seen = new Set(), out = [];
+  let end = new Date().toISOString();
+  for (let page = 0; page < 6; page++){
+    const r = await fetch(COFL + encodeURIComponent(id) + `/history?start=2019-06-01T00:00:00Z&end=${end}`);
+    if (!r.ok) throw new Error(r.status === 429 ? 'zu viele Anfragen' : 'HTTP ' + r.status);
+    const arr = await r.json();
+    if (!Array.isArray(arr) || !arr.length) break;
+    let added = 0, first = Infinity;
+    for (const o of arr){ const t = parseUtc(o.timestamp); if (!isFinite(t)) continue; first = Math.min(first, t); if (!seen.has(t)){ seen.add(t); out.push(o); added++; } }
+    if (arr.length < 1900 || !added || !isFinite(first)) break;
+    end = new Date(first).toISOString();
+  }
+  allHistCache[id] = {at: Date.now(), arr: out};
+  return out;
+}
 async function loadHistory(id, range){
   const R = RANGES[range] || RANGES['24h'];
   if (R.local) return {data: localSeries(id), source: 'local'};
@@ -1291,9 +1312,13 @@ async function loadHistory(id, range){
     ? `/history?start=${R.start || new Date(Date.now() - R.days * 864e5).toISOString()}&end=${new Date().toISOString()}`
     : R.path);
   try{
-    const r = await fetch(url);
-    if (!r.ok) throw new Error(r.status === 429 ? 'zu viele Anfragen' : 'HTTP ' + r.status);
-    const arr = await r.json();
+    let arr;
+    if (R.start) arr = await coflAll(id);
+    else {
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(r.status === 429 ? 'zu viele Anfragen' : 'HTTP ' + r.status);
+      arr = await r.json();
+    }
     if (!Array.isArray(arr) || !arr.length) throw new Error('keine Daten');
     const pts = arr.map(o => ({t: parseUtc(o.timestamp), a: +o.buy || 0, b: +o.sell || 0, ov: o.buyVolume, bv: o.sellVolume}))
       .filter(x => isFinite(x.t)).sort((x, y) => x.t - y.t);
