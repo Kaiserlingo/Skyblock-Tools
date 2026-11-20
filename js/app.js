@@ -192,17 +192,22 @@ function pretty(id){
   if (id.startsWith('SHARD_')) return title(id.slice(6)) + ' Shard';
   return title(id.replace(/:/g, ' '));
 }
-// Seltenheitsfarben, abgestimmt auf hellen Hintergrund
-const RARITY = {COMMON:'#9aa19c', UNCOMMON:'#3c9a5b', RARE:'#3a5fc8', EPIC:'#8a46b8', LEGENDARY:'#c4870f', MYTHIC:'#c23f9e', DIVINE:'#1f9bb3', SPECIAL:'#c24545', VERY_SPECIAL:'#c24545'};
+// Seltenheitsfarben (Minecraft-Farbcodes, je Theme abgestimmt in css/craft.css)
+const RARITY = {COMMON:'var(--r-common)', UNCOMMON:'var(--r-uncommon)', RARE:'var(--r-rare)', EPIC:'var(--r-epic)', LEGENDARY:'var(--r-legendary)', MYTHIC:'var(--r-mythic)', DIVINE:'var(--r-divine)', SPECIAL:'var(--r-special)', VERY_SPECIAL:'var(--r-special)'};
 function rarityColor(id){
   if (S.tiers[id]) return RARITY[S.tiers[id]] || RARITY.COMMON;
   if (id.startsWith('ENCHANTMENT_ULTIMATE')) return RARITY.MYTHIC;
-  if (id.startsWith('ENCHANTMENT_')) return '#6f86c9';
+  if (id.startsWith('ENCHANTMENT_')) return 'var(--r-ench)';
   if (id.startsWith('ESSENCE_')) return RARITY.EPIC;
   return RARITY.COMMON;
 }
+// Item-Bild im Inventar-Slot. Bilder von SkyCofl (Standard-Texturen); fehlt eins, bleibt ein Farbquadrat der Seltenheit.
+const ICON_URL = 'https://sky.coflnet.com/static/icon/';
+function itemIcon(id, big){
+  return `<span class="slot${big ? ' big' : ''}" style="--rc:${rarityColor(id)}"><img src="${ICON_URL}${encodeURIComponent(id)}" alt="" loading="lazy" decoding="async" onerror="this.parentNode.classList.add('ph');this.remove()"></span>`;
+}
 function itemCell(id, name, sub, risk){
-  return `<div class="item"><i class="rar" style="--rc:${rarityColor(id)}"></i><div class="txt"><div class="nm" title="${esc(name)}">${esc(name)}${risk && risk.length ? `<span class="warn" title="${esc(risk.join('\n'))}">!</span>` : ''}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div></div>`;
+  return `<div class="item">${itemIcon(id)}<div class="txt"><div class="nm" title="${esc(name)}">${esc(name)}${risk && risk.length ? `<span class="warn" title="${esc(risk.join('\n'))}">!</span>` : ''}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div></div>`;
 }
 
 /* =========================================================
@@ -694,10 +699,12 @@ function route(){
 function nav(hash){ if (location.hash === '#' + hash) route(); else location.hash = hash; }
 
 function statusEl(){ return `<span class="status" id="status"><i class="dot" id="dot"></i><span id="statusTxt">Lädt…</span></span>`; }
+// Logo: eine Goldmünze aus Pixeln (eigene Zeichnung)
+const LOGO = `<svg viewBox="0 0 12 12" shape-rendering="crispEdges" aria-hidden="true"><path fill="#5c3c00" d="M3 0h6v1h2v2h1v6h-1v2H9v1H3v-1H1V9H0V3h1V1h2z"/><path fill="#ffaa00" d="M3 1h6v1h1v1h1v6h-1v1H9v1H3v-1H2V9H1V3h1V2h1z"/><path fill="#ffd866" d="M3 2h4v1H4v1H3v3H2V3h1z"/><path fill="#b07400" d="M5 3h2v1h1v4H7v1H5V8H4V4h1z"/><path fill="#ffcf40" d="M5 4h2v4H5z"/></svg>`;
 function renderTop(){
   const t = S.tool && TOOL[S.tool];
   $('#top').innerHTML = `<div class="bar">
-      <a class="wordmark" href="#" data-nav="">SkyBlock Tools</a>
+      <a class="wordmark" href="#" data-nav="">${LOGO}<span>SkyBlock <span class="wm-b">Tools</span></span></a>
       <nav class="mainnav" aria-label="Bereiche">
         <a href="#" data-nav="" class="${!t ? 'on' : ''}">Start</a>
         ${TOOLS.map(x => `<a href="#${x.id}" data-nav="${x.id}" class="${t && t.id === x.id ? 'on' : ''}">${x.title}</a>`).join('')}
@@ -707,6 +714,7 @@ function renderTop(){
       <button class="btn ghost themebtn" data-act="theme">${themeBtnInner()}</button>
     </div>`;
   document.body.classList.toggle('in-area', !!t);
+  document.body.dataset.area = t ? t.id : 'home';
   renderTabs(); tick();
 }
 // Seitenmenü des aktiven Bereichs (Gruppen, Zähler, beim Flipper Pausieren/Aktualisieren)
@@ -1159,7 +1167,7 @@ function renderDetail(update){
   const watched = S.watch.includes(id);
   $('#sheet').innerHTML = `
     <header class="dhead">
-      <div><h2>${esc(r.name)}</h2><p class="sub">${esc(id)}${S.tiers[id] ? ', ' + esc(title(S.tiers[id])) : ''}</p></div>
+      <div class="dtitle">${itemIcon(id, true)}<div><h2>${esc(r.name)}</h2><p class="sub">${esc(id)}${S.tiers[id] ? ', ' + esc(title(S.tiers[id])) : ''}</p></div></div>
       <div class="btnrow">
         <a class="btn primary" href="#bazaar/item/${encodeURIComponent(id)}">Genauer analysieren</a>
         <button class="btn" data-star="${esc(id)}">${watched ? 'Auf der Watchlist ★' : 'Auf die Watchlist ☆'}</button>
@@ -1392,7 +1400,7 @@ PAGES.item = function(){
   return `<div class="ana">
     <p class="crumbline"><button class="link" data-act="back">Zurück</button></p>
     <header class="ahead">
-      <div><h1>${esc(r.name)}</h1><p class="sub"><i class="rar" style="--rc:${rarityColor(id)}"></i>${esc(id)}${S.tiers[id] ? ', ' + esc(title(S.tiers[id])) : ''}</p></div>
+      <div>${itemIcon(id, true)}<div><h1>${esc(r.name)}</h1><p class="sub">${esc(id)}${S.tiers[id] ? ', ' + esc(title(S.tiers[id])) : ''}</p></div></div>
       <div class="btnrow">
         <a class="btn" href="#markt/item/${encodeURIComponent(id)}">In der Markt-Analyse öffnen</a>
         <button class="btn ghost" data-act="copy" data-name="${esc(r.name)}">Name kopieren</button>

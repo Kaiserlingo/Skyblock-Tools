@@ -529,8 +529,8 @@ function itemHead(id){
       <p class="hint mk-src">${x && x.b == null ? (x.last != null ? `Gerade kein BIN-Angebot. Zuletzt gesehen: ${price(x.last)} am ${fdt(x.seen)}. ` : 'Gerade kein BIN-Angebot. ') : ''}${x && x.a ? `${x.a === 1 ? '1 Gebots-Auktion' : NF0.format(x.a) + ' Gebots-Auktionen'}, ${x.hb ? 'höchstes Gebot ' + price(x.hb) : 'noch ohne Gebot'}. ` : ''}${I && I.live && I.live.b != null && Math.abs(I.live.b - (x && x.b || 0)) > .5 ? `Live laut SkyCofl gerade: Lowest BIN ${price(I.live.b)}. ` : ''}${pxNote()}</p>
       ${x && x.v ? `<table class="mk-mini mk-var"><thead><tr><th class="l nosort">${id.startsWith('PET_') ? 'Rarity' : 'Stufe'}</th><th class="nosort">Lowest BIN</th></tr></thead><tbody>${Object.entries(x.v).sort((a, b) => a[1] - b[1]).map(([v, p]) => `<tr class="static"><td class="l">${esc(title(v))}</td><td>${price(p)}</td></tr>`).join('')}</tbody></table>` : ''}`;
   }
-  return `<div class="ahead"><div><h1>${esc(nm(id))}</h1>
-    <p class="sub">${[esc(id), tier, cat ? esc(secLabel(cat)) : '', k.bz ? 'Bazaar' : k.ah ? 'Auction House' : k.known ? 'nicht handelbar' : ''].filter(Boolean).join(', ')}</p></div>
+  return `<div class="ahead"><div>${itemIcon(id, true)}<div><h1>${esc(nm(id))}</h1>
+    <p class="sub">${[esc(id), tier, cat ? esc(secLabel(cat)) : '', k.bz ? 'Bazaar' : k.ah ? 'Auction House' : k.known ? 'nicht handelbar' : ''].filter(Boolean).join(', ')}</p></div></div>
     <div class="btnrow">${k.bz ? `<a class="btn primary" href="#bazaar/item/${encodeURIComponent(id)}">Im Bazaar Flipper öffnen</a>` : ''}<button class="btn ghost" data-mkcopy="${esc(nm(id))}">Name kopieren</button></div></div>${px}`;
 }
 async function mountItem(){

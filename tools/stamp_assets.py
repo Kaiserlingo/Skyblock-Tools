@@ -4,7 +4,7 @@ Aufruf vor jedem Commit:  python3 tools/stamp_assets.py"""
 import hashlib, re, pathlib
 root = pathlib.Path(__file__).resolve().parent.parent
 html = (root / 'index.html').read_text(encoding='utf-8')
-for path in ['css/style.css', 'js/chart.js', 'js/app.js', 'js/econ.js', 'js/categories.js', 'js/markt.js', 'js/start.js']:
+for path in ['css/style.css', 'css/craft.css', 'js/chart.js', 'js/app.js', 'js/econ.js', 'js/categories.js', 'js/markt.js', 'js/start.js']:
     h = hashlib.sha1((root / path).read_bytes()).hexdigest()[:8]
     html = re.sub(re.escape(path) + r'(\?v=[0-9a-f]+)?"', f'{path}?v={h}"', html)
 (root / 'index.html').write_text(html, encoding='utf-8')
