@@ -18,15 +18,24 @@ async function get(url, tries = 5){
     }catch(e){ if (k === tries - 1) throw new Error(url + ': ' + e.message); await sleep(1500 * (k + 1)); }
   }
 }
-// Alle Seiten müssen zum selben Stand gehören, sonst fehlen oder doppeln sich Auktionen
-async function scan(){
-  for (let attempt = 0; attempt < 7; attempt++){
-    const p0 = await get(H + 'auctions?page=0');
-    const rest = [];
-    for (let i = 1; i < p0.totalPages; i += 8) rest.push(...await Promise.all(Array.from({length: Math.min(8, p0.totalPages - i)}, (_, k) => get(H + 'auctions?page=' + (i + k)))));
-    const pages = [p0, ...rest], stamps = new Set(pages.map(p => p.lastUpdated));
-    if (stamps.size === 1) return {pages, lastUpdated: p0.lastUpdated, total: p0.totalAuctions};
-    console.log('Stand hat sich während des Abrufs geändert, neuer Versuch …'); await sleep(4000);
+// Alle Seiten müssen zum selben Stand gehören, sonst fehlen oder doppeln sich Auktionen.
+// Hypixel liefert einzelne Seiten manchmal noch aus einem älteren Cache: diese Seiten werden
+// gezielt neu geholt, bis alle denselben (neuesten) Stand haben.
+async function scan(depth = 0){
+  const p0 = await get(H + 'auctions?page=0');
+  const pages = [p0];
+  for (let i = 1; i < p0.totalPages; i += 8) pages.push(...await Promise.all(Array.from({length: Math.min(8, p0.totalPages - i)}, (_, k) => get(H + 'auctions?page=' + (i + k)))));
+  for (let round = 0; round < 12; round++){
+    const target = Math.max(...pages.map(p => p.lastUpdated));
+    const stale = pages.map((p, i) => p.lastUpdated < target ? i : -1).filter(i => i >= 0);
+    if (!stale.length && pages.every(p => p.totalPages === pages.length)) return {pages, lastUpdated: target, total: pages[0].totalAuctions};
+    if (pages.some(p => p.totalPages !== pages.length)){   // Seitenzahl hat sich geändert: alles neu
+      if (depth >= 3) break; console.log('Seitenzahl geändert, alles neu …'); await sleep(3000); return scan(depth + 1);
+    }
+    console.log(`${stale.length} Seiten mit älterem Stand, neu holen (Runde ${round + 1}) …`);
+    await sleep(2500);
+    const fresh = await Promise.all(stale.map(i => get(H + 'auctions?page=' + i)));
+    stale.forEach((i, k) => { pages[i] = fresh[k]; });
   }
   throw new Error('kein einheitlicher Stand der Auktionen');
 }
