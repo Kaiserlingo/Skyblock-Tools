@@ -642,7 +642,7 @@ function renderTabs(){
   if (!t){ el.innerHTML = ''; return; }
   const counts = S.tool !== 'bazaar' ? {} : S.rows.length ? {flips: filteredFlips(true).length, crafts: filteredCrafts(true).length, npc: S.rows.filter(r => r.npc > 0 && r.npcOrder > 0 && liquid(r)).length, watch: S.watch.length} : {watch: S.watch.length};
   const label = id => (t.tabs.find(x => x.id === id) || {}).label || id;
-  const cur = S.tab === 'item' ? (S.returnTo || t.defaultTab) : S.tab;
+  const cur = S.tab !== 'item' ? S.tab : t.id === 'markt' ? 'items' : (t.tabs.some(x => x.id === S.returnTo) ? S.returnTo : t.defaultTab);
   el.innerHTML = `<p class="side-title">${t.title}</p>
     ${t.menu.map(g => `<div class="side-group"><p class="side-h">${g.label}</p>
       ${g.items.map(id => `<a href="#${t.id}/${id}" data-tab="${id}" class="${cur === id ? 'on' : ''}">${label(id)}${counts[id] ? `<span class="n">${NF0.format(counts[id])}</span>` : ''}</a>`).join('')}</div>`).join('')}
