@@ -49,7 +49,7 @@ const PAGES = {
       <td>${price(r.profit)}<small>${pct(r.marginPct, false)}</small></td>
       <td>${spreadCell(r)}</td>
       <td>${fmt(r.perHour)}</td>
-      <td>${bar(r.pphTyp, max)}<small>${r.pphTyp < r.pph ? 'jetzt ' + fmt(r.pph) : fmt(r.qty) + ' Stück pro Stunde'}</small></td></tr>`).join('');
+      <td>${bar(r.pphTyp, max)}<small>${r.pphTyp < r.pph ? 'jetzt ' + fmt(r.pph) : 'dein Anteil: ' + fmt(r.qty) + ' Stück pro Stunde'}</small></td></tr>`).join('');
     return toolbar('flips', rows.length, rows.length === 1 ? 'Flip' : 'Flips') + statsNote() + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(8, 'Kein Flip passt.', 'Probier eine andere Strategie oder lockere die Filter.')}</tbody></table></div>${html}
       <p class="hint">Setz eine Buy-Order zum grünen Preis. Sobald sie gefüllt ist, stellst du eine Sell-Offer zum Preis daneben ein. Klick auf eine Zeile für Verlauf und Orderbuch.</p>`;
   },
@@ -71,7 +71,7 @@ const PAGES = {
       <td class="sell">${fmt(c.revenue)}</td>
       <td class="${cls(c.profit)}">${fmt(c.profit)}<small>${pct(c.marginPct, false)}, sofort ${fmt(c.fastProfit)}</small></td>
       <td>${fmt(c.craftsH)}<small>Engpass ${esc(c.limitingName)}</small></td>
-      <td>${bar(c.pph, max)}<small>${fmt(c.qty)} Crafts pro Stunde</small></td></tr>`).join('');
+      <td>${bar(c.pph, max)}<small>dein Anteil: ${fmt(c.qty)} Crafts pro Stunde</small></td></tr>`).join('');
     return toolbar('crafts', rows.length, rows.length === 1 ? 'Craft-Flip' : 'Craft-Flips') + `<div class="tablewrap"><table><thead>${head}</thead><tbody>${body || emptyRow(7, 'Kein Craft-Flip passt.', 'Probier eine andere Strategie oder ändere den Ablauf im Filter.')}</tbody></table></div>${html}
       <p class="hint">Nur Rezepte, bei denen das Ergebnis und alle Zutaten im Bazaar gehandelt werden, kein Auktionshaus. ${NF0.format(S.crafts.length)} von ${NF0.format(RECIPES.length)} Rezepten gehen komplett über den Bazaar. Das Rezept musst du über die Collection freigeschaltet haben.</p>`;
   },

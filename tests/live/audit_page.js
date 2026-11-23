@@ -130,7 +130,15 @@ window.siteAudit = async function(opt = {}){
       }
     }
     window.__auditStep = 'Reiter ' + id;
-    for (const t of ITABS){ const b = document.querySelector(`[data-mitab="${t.id}"]`); if (b){ b.click(); await wait(250); scan(`#markt/item/${id} ${t.id}`); } }
+    for (const t of ITABS){
+      const b = document.querySelector(`[data-mitab="${t.id}"]`); if (!b) continue;
+      b.click(); await wait(250); scan(`#markt/item/${id} ${t.id}`);
+      if (t.id === 'market' && I.k.bz && r){
+        const sec = [...document.querySelectorAll('.mk-itab section')].find(x => /Gleichgewichtsbereich/.test(x.textContent));
+        if (sec){ const f = dl(sec); chk('Angebot & Nachfrage: Spread = Kopf', f['Spread'] === head['Spread'], id, [f['Spread'], head['Spread']]);
+          chk('Angebot & Nachfrage: Bereich = Instasell bis Instabuy', f['Gleichgewichtsbereich'] === N(`${price(r.topBuy)} bis ${price(r.topSell)}`), id, [f['Gleichgewichtsbereich']]); }
+      }
+    }
     const fb = document.querySelector('[data-mitab="forecast"]'); if (fb) fb.click();
     // dieselbe Zahl im Bazaar Flipper (Analyse-Seite)
     if (I.k.bz && r){
@@ -155,6 +163,17 @@ window.siteAudit = async function(opt = {}){
     const m = dl(document.querySelector('#modal .figures'));
     chk('Flip-Tabelle = Detailfenster (Profit pro Stunde)', (m['Profit pro Stunde'] || '').startsWith(cell), id, [cell, m['Profit pro Stunde']]);
     chk('Flip-Tabelle = Detailfenster (Gewinn pro Stück)', m['Flip-Gewinn pro Stück'] === N(price(r.profit)), id, [m['Flip-Gewinn pro Stück'], price(r.profit)]);
+    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})); await until(() => !document.querySelector('#modal.on'), 2000);
+  }
+
+  await go('#bazaar/crafts', () => document.querySelector('#view table'));
+  const cids = [...document.querySelectorAll('#view tbody tr[data-craft]')].slice(0, 5).map(tr => +tr.dataset.craft);
+  for (const ri of cids){
+    const c = S.crafts.find(x => x.ri === ri), tr = document.querySelector(`#view tbody tr[data-craft="${ri}"]`); if (!c || !tr) continue;
+    chk('Craft-Tabelle = Rechnung', N(tr.children[2].textContent) === N(fmt(c.cost)) && N(tr.children[6].childNodes[0].textContent || tr.children[6].textContent).includes(N(fmt(c.pph))), c.id, [N(tr.textContent).slice(0, 160)]);
+    tr.click(); await until(() => document.querySelector('#modal.on'), 3000);
+    const m = dl(document.querySelector('#modal .figures'));
+    chk('Craft-Tabelle = Detailfenster', m['Kosten pro Craft'] === N(fmt(c.cost)) && m['Profit pro Stunde'] === N(fmt(c.pph)) && m['Gewinn pro Craft'] === N(fmt(c.profit)), c.id, m);
     document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})); await until(() => !document.querySelector('#modal.on'), 2000);
   }
 
