@@ -14,11 +14,9 @@ document.addEventListener('click', e => {
   if ((el = q('[data-mkpg]'))){ K.list.page = Math.max(0, K.list.page + +el.dataset.mkpg); drawList(); window.scrollTo({top: 0}); return; }
   if ((el = q('[data-mkclear]'))){ K.list.q = ''; const s = $('#msearch'); if (s){ s.value = ''; s.parentElement.classList.remove('has'); s.focus(); } drawList(); return; }
   if ((el = q('[data-mkrange]'))){ K.idx.range = +el.dataset.mkrange; document.querySelectorAll('[data-mkrange]').forEach(b => b.classList.toggle('on', b === el)); feedIndexChart(); return; }
-  if ((el = q('[data-mirange]'))){ K.itRange = el.dataset.mirange; document.querySelectorAll('[data-mirange]').forEach(b => b.classList.toggle('on', b === el)); feedItemChart(); return; }
   if ((el = q('[data-mkmayor]'))){ K.mayorSel = el.dataset.mkmayor; redraw(); const m = $('.mk-mf'); if (m) m.scrollIntoView({block: 'nearest', behavior: 'smooth'}); return; }
   if ((el = q('[data-mitab]'))){ K.itTab = el.dataset.mitab; drawItem(true); return; }
   if ((el = q('[data-fcside]'))){ K.fcSide = el.dataset.fcside; drawItem(true); return; }
-  if ((el = q('[data-fcview]'))){ K.fcView = +el.dataset.fcview; drawItem(true); return; }
   if ((el = q('[data-mkmob]'))){ K.mob = el.dataset.mkmob; drawItem(false); return; }
   if ((el = q('[data-mkcopy]'))){ const txt = el.dataset.mkcopy; (navigator.clipboard ? navigator.clipboard.writeText(txt) : Promise.reject()).then(() => { el.textContent = 'Kopiert'; setTimeout(() => el.textContent = 'Name kopieren', 1500); }).catch(() => {}); return; }
 });
@@ -26,7 +24,6 @@ document.addEventListener('change', e => {
   if (S.tool !== 'markt') return;
   const t = e.target;
   if (t.dataset.mkopt){ K.idx[t.dataset.mkopt] = t.checked; feedIndexChart(); }
-  else if (t.dataset.miopt){ K[t.dataset.miopt === 'bands' ? 'itBands' : 'itMarks'] = t.checked; feedItemChart(); }
   else if (t.hasAttribute('data-mkcmp')){ K.idx.cmp = t.value; feedIndexChart(); }
   else if (t.hasAttribute('data-mksecsel')){ K.list.sec = t.value; K.list.page = 0; drawList(); }
   else if (t.dataset.mkcalc){
@@ -37,6 +34,11 @@ document.addEventListener('change', e => {
   }
 });
 document.addEventListener('input', e => {
+  if (S.tool === 'markt' && e.target.id === 'pg-date'){
+    K.fcDate = e.target.value; const I = K.it, F = I && I.fc, el = $('#pg-dres');
+    if (F && !F.err && el) el.innerHTML = pgDateResult(I, F, fcSide(I, F));
+    return;
+  }
   if (S.tool === 'markt' && e.target.id === 'pg-target'){
     K.fcTarget = e.target.value.trim();
     clearTimeout(K.fcT); K.fcT = setTimeout(() => { const I = K.it, F = I && I.fc, el = $('#pg-tres'); if (F && !F.err && el) el.innerHTML = fcTargetResult(I, F, fcSide(I, F)); }, 250);
@@ -58,3 +60,5 @@ function mkEnsure(){ return Promise.allSettled([loadMD(), loadPx(), loadLive(), 
 function mkData(){ const m = curMayor(); return {md: K.md, px: K.px, pxErr: K.pxErr, mdErr: K.mdErr, mayor: m, mayorEnd: m && m.term ? m.term.end : nextMayorChange(Date.now()), election: K.election, fires: K.fires, pxAge: pxAge()}; }
 window.Markt = {render: mkRender, mount: mkMount, update: mkUpdate, leave: mkLeave, pageTitle: mkPageTitle, hubMeta: mkHubMeta, ensure: mkEnsure, data: mkData, nm, catOf, secLabel, universe, ahFee, openCategory, _K: K, _analyze: analyze, _bzPoints: bzPoints, _ahPoints: ahPoints};
 if (S.tool === 'markt') renderMain(true);
+
+document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('pg-days')) K.fcDays = e.target.open; }, true);

@@ -3,16 +3,7 @@
 /* =========================================================
    Analyse-Seite eines Items  (#bazaar/item/ID)
    ========================================================= */
-const TOOLS_DRAW = [
-  ['none', 'Bewegen', 'V', 'Ziehen verschiebt, Mausrad zoomt'],
-  ['trend', 'Trendlinie', 'T', 'Zwei Klicks: Start und Ende'],
-  ['hline', 'Horizontale', 'H', 'Ein Klick: Preislinie, z. B. Unterstützung oder Widerstand'],
-  ['rect', 'Zone', 'Z', 'Zwei Klicks: gegenüberliegende Ecken'],
-  ['fib', 'Fibonacci', 'F', 'Zwei Klicks: Hoch und Tief'],
-  ['text', 'Notiz', 'N', 'Ein Klick, dann Text eingeben'],
-  ['measure', 'Messen', 'M', 'Zwei Klicks: Veränderung in Prozent und Zeit'],
-  ['erase', 'Radierer', 'E', 'Klick auf eine Zeichnung löscht sie'],
-];
+const TOOLS_DRAW = DRAW_TOOLS;   // dieselben Werkzeuge wie überall (js/ui/chart-panel.js)
 let anaTool = 'none', anaRes = null;
 function drawKey(id){ return 'draw:' + id; }
 

@@ -8,7 +8,7 @@ const RANGES = {
   '1h':    {label: '1 h',     path: '/history/hour', span: HOUR},
   '24h':   {label: '24 h',    path: '/history/day',  span: 24*HOUR},
   '7d':    {label: '7 Tage',  path: '/history/week', span: 7*24*HOUR},
-  '30d':   {label: '30 Tage', days: 30,              span: 30*24*HOUR},
+  '30d':   {label: '31 Tage', days: 31,              span: 31*24*HOUR},
   '90d':   {label: '90 Tage', days: 90,              span: 90*24*HOUR},
   '1y':    {label: '1 Jahr',  days: 365,             span: 365*24*HOUR},
   'all':   {label: 'Alles',   start: '2019-06-01T00:00:00Z', span: Infinity},

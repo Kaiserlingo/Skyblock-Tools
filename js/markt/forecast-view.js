@@ -81,7 +81,7 @@ function fcRun(I){
   const sim = Forecast.simulate(fit, {H: FC_DAYS, n: FC_PATHS, seed, y0, terms: my.terms, cal: cfg.cal, noise: intra.noise});
   // Zerlegung der erwarteten Entwicklung (ohne Zufall, Mayors als Erwartungswert)
   const det = (opt) => Forecast.expected(fit, Object.assign({H: 31, y0, terms: my.terms, cal: cfg.cal}, opt));
-  const parts = {none: det({k: 0, f: 0, m: 0, mu: 0, my: false}), trend: det({k: 0, f: 0, m: 0, my: false}), dyn: det({my: false}), all: det({})};
+  const parts = {none: det({k: 0, f: 0, m: 0, mu: 0, my: false}), trend: det({k: 0, f: 0, m: 0, my: false}), rev: det({f: 0, m: 0, my: false}), dyn: det({my: false}), all: det({})};
   return {fit, sim, y0, start, sides, intra, my, cfg, parts, end, y, at: now, seed, liveAt: sides.live};
 }
 function fcGet(I){
@@ -108,62 +108,117 @@ function forecastHTML(I){
   const F = fcGet(I);
   if (!F) return card('Preisprognose', '', '<p class="loading">Lädt …</p>', true);
   if (F.err) return card('Preisprognose', '', `<p class="note">${F.err}</p>`, true);
-  const side = fcSide(I, F), s = F.sim, cfg = F.cfg;
+  const side = fcSide(I, F), s = F.sim;
   const now = fcNow(F, side);
-  // Chance auf Anstieg gegenüber dem angezeigten Preis
-  const upAt = k => { const lim = Math.log(now / side[2]); let c = 0; for (let p = 0; p < s.N; p++) if (s.paths[p * s.H + k] > lim) c++; return c / s.N; };
   const tile = ([h, label]) => {
     const q = s.q[h - 1], med = fcPx(F, side, q[3]);
-    return `<div class="pg-tile"><dt>${label}</dt><dd><b>${price(med)}</b> ${PC(med / now - 1)}</dd>
+    return `<div class="pg-tile"><dt>${label} <span class="mut">${fcDate(F, h)}</span></dt><dd><b>${price(med)}</b> ${PC(med / now - 1)}</dd>
       <dd class="pg-r"><span>wahrscheinlich</span> ${fmt(fcPx(F, side, q[2]))} bis ${fmt(fcPx(F, side, q[4]))}</dd>
       <dd class="pg-r"><span>fast sicher</span> ${fmt(fcPx(F, side, q[1]))} bis ${fmt(fcPx(F, side, q[5]))}</dd>
-      <dd class="pg-r"><span>Chance auf Anstieg</span> ${NF0.format(upAt(h - 1) * 100)} %</dd></div>`;
+      <dd class="pg-r"><span>Chance, dass es mehr kostet</span> ${NF0.format(fcUp(F, side, h) * 100)} %</dd></div>`;
   };
-  const sideSeg = F.sides.list.length > 1 ? `<div class="seg sm" role="group" aria-label="Preisart">${F.sides.list.map(([k, l]) => `<button data-fcside="${k}" class="${side[0] === k ? 'on' : ''}">${l}</button>`).join('')}</div>` : '';
-  const viewSeg = `<div class="seg sm" role="group" aria-label="Zeitraum">${[31, 90, 180].map(d => `<button data-fcview="${d}" class="${(K.fcView || 31) === d ? 'on' : ''}">${d} Tage</button>`).join('')}</div>`;
+  const sideSeg = F.sides.list.length > 1 ? `<div class="cp-group"><span class="cp-l">Preis</span><div class="seg sm" role="group" aria-label="Preisart">${F.sides.list.map(([k, l]) => `<button data-fcside="${k}" class="${side[0] === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : '';
+  const max = new Date(F.at + FC_DAYS * DAY).toISOString().slice(0, 10), min = new Date(F.at + DAY).toISOString().slice(0, 10);
   return `<section class="wide pg">
     <h2>Preisprognose</h2>
-    <div class="pg-bar">${sideSeg}${viewSeg}</div>
-    <p class="pg-now">Jetzt <b>${price(now)}</b> <span class="mut">${side[1]}, Grundlage: ${F.start}</span></p>
+    <div class="pg-bar">${sideSeg}<p class="pg-now">Jetzt <b>${price(now)}</b> <span class="mut">${side[1]}, Grundlage: ${F.start}</span></p></div>
     <dl class="pg-tiles">${FCH.map(tile).join('')}</dl>
-    ${fcChart(I, F, side)}
-    <p class="note">Die Linie ist der mittlere Pfad (Median): Der echte Preis liegt mit gleicher Wahrscheinlichkeit darüber wie darunter. Das dunkle Band zeigt den wahrscheinlichen Bereich (50 % der Fälle), das helle den Bereich, in dem der Preis in 80 % der Fälle landet. „Fast sicher“ in den Kacheln ist dieser 80-%-Bereich.</p>
+    ${pgPanel().html()}
+    <div class="pg-date"><label class="input pg-in"><span>Preis an einem Tag</span><input type="date" id="pg-date" min="${min}" max="${max}" value="${esc(K.fcDate || '')}" aria-label="Datum wählen"></label><div id="pg-dres">${pgDateResult(I, F, side)}</div></div>
+    <details class="pg-days"${K.fcDays ? ' open' : ''}><summary>Tag für Tag: erwarteter Preis für jedes Datum</summary>${pgTable(I, F, side)}</details>
   </section>
   ${fcTargetHTML(I, F, side)}
   ${fcDriversHTML(I, F, side)}
   ${fcReliabilityHTML(I, F)}`;
 }
-// Fächerdiagramm: Verlauf der letzten Wochen und Prognose mit 50-%- und 80-%-Band
-function fcChart(I, F, side){
-  const view = K.fcView || 31, s = F.sim, back = Math.min(view >= 90 ? 90 : 45, F.end + 1);
-  const W = 760, Hh = 250, padL = 8, padR = 74, padT = 12, padB = 26;
-  const hist = []; for (let i = F.end - back + 1; i <= F.end; i++) if (F.y[i] != null) hist.push([i - F.end - 1, fcPx(F, side, F.y[i])]);
-  // Bazaar: echte Verläufe der gewählten Seite statt umgerechneter Basis
-  if (I.k.bz && side[0] !== 'mid'){
-    const pts = E.mergeRecent(I.h1 || [], I.h7 || [], K.md && K.md.recentCut || 0).map(p => ({t: p.t, v: p[side[0]]}));
-    const d = E.daily(pts, {days: F.y.length, end: K.md ? K.md.days.to : E.dayStart(Date.now())}), v = E.hampel(d.v);
-    hist.length = 0; for (let i = F.end - back + 1; i <= F.end; i++) if (num(v[i])) hist.push([i - F.end - 1, v[i]]);
+// Datum in h Tagen, kurz
+const fcDate = (F, h) => new Date(F.at + h * DAY).toLocaleDateString('de-AT', {weekday: 'short', day: 'numeric', month: 'short'});
+// Anteil der simulierten Pfade, die in h Tagen über dem heutigen Preis der Seite liegen
+function fcUp(F, side, h){ const s = F.sim, lim = Math.log(fcNow(F, side) / side[2]), k = h - 1; let c = 0; for (let p = 0; p < s.N; p++) if (s.paths[p * s.H + k] > lim) c++; return c / s.N; }
+// Kennzahlen für Tag h (0 = jetzt)
+function fcDay(F, side, h){
+  const now = fcNow(F, side);
+  if (h <= 0) return {h: 0, t: F.at, med: now, q10: now, q25: now, q75: now, q90: now, ch: 0, up: null};
+  const q = F.sim.q[Math.min(h, F.sim.H) - 1], med = fcPx(F, side, q[3]);
+  return {h, t: F.at + h * DAY, med, q10: fcPx(F, side, q[1]), q25: fcPx(F, side, q[2]), q75: fcPx(F, side, q[4]), q90: fcPx(F, side, q[5]), ch: med / now - 1, up: fcUp(F, side, h)};
+}
+const fcRel = h => h === 0 ? 'jetzt' : h === 1 ? 'morgen' : `in ${h} Tagen`;
+
+/* ---------- Prognose-Diagramm (gleiches Diagramm wie überall, mit Prognose-Fächer) ---------- */
+const FC_HIST = [['7d', '7 Tage', 7], ['30d', '31 Tage', 31], ['90d', '90 Tage', 90], ['1y', '1 Jahr', 365]];
+const FC_HOR = [['7', '7 Tage'], ['31', '31 Tage'], ['90', '90 Tage'], ['180', '180 Tage']];
+function pgPanel(){
+  const p = ChartPanels.pg;
+  if (p && p.o.id === S.itemId) return p;
+  return new ChartPanel('pg', {
+    id: S.itemId, rangeLabel: 'Verlauf', ranges: FC_HIST.map(r => [r[0], r[1]]), range: K.fcHist,
+    onRange: r => { K.fcHist = r; pgFeed(); },
+    ranges2: {label: 'Prognose', items: FC_HOR, value: String(K.fcView), onChange: v => { K.fcView = +v; pgFeed(); }},
+    checks: [['b50', 'Bereich „wahrscheinlich“', K.fcB50, 'k-draw'], ['b80', 'Bereich „fast sicher“', K.fcB80, 'k-draw']],
+    onCheck: (k, on) => { K[k === 'b50' ? 'fcB50' : 'fcB80'] = on; pgFeed(true); },
+    drawKey: () => 'draw:fc:' + S.itemId,
+    note: 'Fahre mit der Maus über den Prognose-Teil: Für jeden Tag stehen erwarteter Preis und Bereiche unter dem Diagramm. Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles. Zeichnungen (z. B. eine Horizontale bei deinem Zielpreis) werden pro Item gespeichert.',
+  });
+}
+// echter Verlauf der gewählten Preisart
+function pgHist(I, F, side, days){
+  const from = F.at - days * DAY, A = I.A, sk = side[0];
+  const val = p => sk === 'buy' || sk === 'sell' ? p[sk] : num(p.v) ? p.v * side[2] : null;
+  if (days <= 7 && I.h7 && I.h7.length > 8){
+    const pts = I.h7.filter(p => p.t >= from && num(val(p)));
+    return {t: pts.map(p => p.t), v: pts.map(val)};
   }
-  hist.push([0, fcNow(F, side)]);
-  const q = s.q.slice(0, view).map(r => r.map(x => fcPx(F, side, x)));
-  const all = hist.map(h => h[1]).concat(q.flatMap(r => [r[1], r[5]]));
-  let lo = Math.min(...all), hi = Math.max(...all); const pad = (hi - lo) * .06 || hi * .05; lo = Math.max(0, lo - pad); hi += pad;
-  const x0 = -back, x1 = view, X = d => padL + (d - x0) / (x1 - x0) * (W - padL - padR), Y = v => padT + (1 - (v - lo) / (hi - lo)) * (Hh - padT - padB);
-  const band = (a, b) => `M${q.map((r, k) => `${X(k + 1).toFixed(1)},${Y(r[a]).toFixed(1)}`).join('L')}L${q.map((r, k) => `${X(k + 1).toFixed(1)},${Y(r[b]).toFixed(1)}`).reverse().join('L')}Z`;
-  const p0 = fcNow(F, side);
-  const join = (a) => `M${X(0).toFixed(1)},${Y(p0).toFixed(1)}L` + band(a, a).slice(1).split('L').slice(0, q.length).join('L');
-  const ticks = [lo + (hi - lo) * .1, lo + (hi - lo) * .5, lo + (hi - lo) * .9];
-  const marks = FCH.filter(([h]) => h <= view).map(([h, l]) => `<line x1="${X(h)}" x2="${X(h)}" y1="${padT}" y2="${Hh - padB}" class="pg-mark"/>${X(h) - X(0) > 34 ? `<text x="${X(h)}" y="${Hh - 8}" class="pg-ax" text-anchor="middle">${h === 1 ? '24 h' : h + ' T'}</text>` : ''}`).join('');
-  const tips = q.map((r, k) => `<rect x="${X(k + .5)}" y="${padT}" width="${Math.max(X(k + 1.5) - X(k + .5), 1)}" height="${Hh - padT - padB}" class="pg-hit"><title>${new Date(Date.now() + (k + 1) * DAY).toLocaleDateString('de-AT', {weekday: 'short', day: 'numeric', month: 'short'})}: ${price(r[3])}\nwahrscheinlich ${fmt(r[2])} bis ${fmt(r[4])}\n80 %: ${fmt(r[1])} bis ${fmt(r[5])}</title></rect>`).join('');
-  return `<figure class="pg-chart"><svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="Preisprognose für ${view} Tage">
-    ${ticks.map(v => `<line x1="${padL}" x2="${W - padR}" y1="${Y(v)}" y2="${Y(v)}" class="pg-grid"/><text x="${W - padR + 6}" y="${Y(v) + 4}" class="pg-ax">${fmt(v)}</text>`).join('')}
-    <line x1="${X(0)}" x2="${X(0)}" y1="${padT}" y2="${Hh - padB}" class="pg-today"/><text x="${X(0) - 4}" y="${Hh - 8}" class="pg-ax" text-anchor="end">heute</text>
-    ${marks}
-    <path d="${band(1, 5)}" class="pg-b80"/><path d="${band(2, 4)}" class="pg-b50"/>
-    <path d="M${hist.map(([d, v]) => `${X(d).toFixed(1)},${Y(v).toFixed(1)}`).join('L')}" class="pg-hist"/>
-    <path d="${join(3)}" class="pg-med"/>
-    <circle cx="${X(0)}" cy="${Y(p0)}" r="3.5" class="pg-dot"/>
-    ${tips}</svg></figure>`;
+  let v = A.v.map(x => num(x) ? x * side[2] : null);
+  if (I.k.bz && (sk === 'buy' || sk === 'sell')){
+    const pts = E.mergeRecent(I.h1 || [], I.h7 || [], K.md && K.md.recentCut || 0).map(p => ({t: p.t, v: p[sk]}));
+    v = E.hampel(E.daily(pts, {days: A.v.length, end: K.md ? K.md.days.to : E.dayStart(Date.now())}).v);
+  }
+  const t = [], o = [];
+  for (let i = 0; i < A.T.length; i++) if (A.T[i] >= from - DAY / 2 && num(v[i])){ t.push(A.T[i] + DAY / 2); o.push(v[i]); }
+  return {t, v: o};
+}
+function pgFeed(keepView){
+  const I = K.it, F = I && I.fc, p = ChartPanels.pg, ch = p && p.chart; if (!ch || !F || F.err) return;
+  const side = fcSide(I, F), H = K.fcView, days = (FC_HIST.find(r => r[0] === K.fcHist) || FC_HIST[1])[2];
+  const h = pgHist(I, F, side, days);
+  ch.labels = {hi: side[1], lo: ''};
+  ch.empty = 'Kein Verlauf';
+  ch.setIndicators({hi: true, lo: false, spread: false, volume: false, sma: 0, ema: 0, bb: false});
+  ch.setData({t: h.t, hi: h.v, lo: h.v.map(() => null), vb: [], vs: []}, true);
+  const f = {t: [], med: [], q10: [], q25: [], q75: [], q90: [], show50: K.fcB50, show80: K.fcB80};
+  for (let k = 0; k <= H; k++){ const d = fcDay(F, side, k); f.t.push(d.t); for (const x of ['med', 'q10', 'q25', 'q75', 'q90']) f[x].push(d[x]); }
+  ch.onHoverFc = k => p.legend(pgLegend(F, side, k == null ? H : k, k == null));
+  ch.setForecast(f, keepView);
+  p.legend(pgLegend(F, side, H, true));
+}
+function pgLegend(F, side, h, idle){
+  const d = fcDay(F, side, h);
+  return `<div class="pg-leg${idle ? ' idle' : ''}">
+    <div class="pg-leg-d"><b>${fcRel(h)}</b><span>${new Date(d.t).toLocaleDateString('de-AT', {weekday: 'long', day: 'numeric', month: 'long'})}</span></div>
+    <div><span>Erwartet</span><b>${price(d.med)}</b> ${h ? PC(d.ch) : ''}</div>
+    <div><span>Wahrscheinlich (50 %)</span>${fmt(d.q25)} bis ${fmt(d.q75)}</div>
+    <div><span>Fast sicher (80 %)</span>${fmt(d.q10)} bis ${fmt(d.q90)}</div>
+    <div><span>Chance, dass es mehr kostet als jetzt</span>${d.up == null ? '–' : NF0.format(d.up * 100) + ' %'}</div>
+  </div>${idle ? '<p class="hint pg-leg-h">Zeigt das Ende des gewählten Zeitraums. Maus über den Prognose-Teil bewegen für einen anderen Tag.</p>' : ''}`;
+}
+function pgDateResult(I, F, side){
+  if (!K.fcDate) return '<p class="hint">Wähle ein Datum in den nächsten 180 Tagen.</p>';
+  const t = Date.parse(K.fcDate + 'T12:00:00'), h = Math.round((t - F.at) / DAY);
+  if (!isFinite(h) || h < 1 || h > FC_DAYS) return '<p class="note neg">Das Datum muss zwischen morgen und in 180 Tagen liegen.</p>';
+  const d = fcDay(F, side, h);
+  return `<p class="pg-ans">${esc(side[1])} ${fcRel(h)} (${fcDate(F, h)}): <b>${price(d.med)}</b> ${PC(d.ch)}. Wahrscheinlich ${fmt(d.q25)} bis ${fmt(d.q75)}, fast sicher ${fmt(d.q10)} bis ${fmt(d.q90)}. Chance, dass es dann mehr kostet als jetzt: ${NF0.format(d.up * 100)} %.</p>`;
+}
+function pgTable(I, F, side){
+  const hs = []; for (let h = 1; h <= 31; h++) hs.push(h); for (let h = 35; h <= FC_DAYS; h += 7) hs.push(h); if (hs[hs.length - 1] !== FC_DAYS) hs.push(FC_DAYS);
+  return `<table class="mk-mini pg-tbl"><thead><tr><th class="l nosort">Datum</th><th class="nosort">Erwartet</th><th class="nosort">Veränderung</th><th class="nosort">Wahrscheinlich (50 %)</th><th class="nosort">Fast sicher (80 %)</th><th class="nosort">Chance auf mehr</th></tr></thead><tbody>
+    ${hs.map(h => { const d = fcDay(F, side, h); return `<tr class="static${h === 7 || h === 31 ? ' hl' : ''}"><td class="l">${fcDate(F, h)}<small>${fcRel(h)}</small></td><td>${price(d.med)}</td><td>${PC(d.ch)}</td><td>${fmt(d.q25)} – ${fmt(d.q75)}</td><td>${fmt(d.q10)} – ${fmt(d.q90)}</td><td>${NF0.format(d.up * 100)} %</td></tr>`; }).join('')}
+  </tbody></table><p class="hint">Bis 31 Tage jeder Tag, danach wöchentlich. Preise: ${esc(side[1])}.</p>`;
+}
+// nach dem Einfügen ins DOM: Diagramm anlegen (Ansicht bleibt erhalten, wenn dasselbe Item neu gezeichnet wird)
+function pgMount(view){
+  const p = ChartPanels.pg; if (!p || !document.getElementById('pg-chart')) return;
+  p.mount(); pgFeed();
+  if (view && p.chart){ p.chart.view = view; p.chart.follow = false; p.chart.draw(); }
 }
 function fcTargetHTML(I, F, side){
   return `<section class="pg-target"><h2>Zielpreis</h2>
@@ -201,21 +256,63 @@ function fcCurve(cum){
     ${xt.map(x => `<text x="${X(x - 1)}" y="${H - 6}" text-anchor="middle" class="pg-ax">${x === 1 ? '1 T' : x + ' T'}</text>`).join('')}
     <path d="${d}" class="pg-med"/></svg><figcaption class="note">Wahrscheinlichkeit, den Zielpreis bis zu diesem Tag erreicht zu haben</figcaption></figure>`;
 }
+/* ---------- Was die Prognose bestimmt ----------
+   Zerlegung des erwarteten Pfads (ohne Zufall) in einzelne Einflüsse, dazu Vergleichsfälle aus der eigenen Geschichte des Items. */
 function fcDriversHTML(I, F, side){
-  const p = F.parts, ch = (a, b, h) => Math.exp(a[h - 1] - b[h - 1]) - 1;
-  const row = (l, a, b, why) => `<tr class="static"><td class="l">${l}${why ? `<small>${why}</small>` : ''}</td><td>${PC(ch(a, b, 7))}</td><td>${PC(ch(a, b, 31))}</td></tr>`;
-  const fit = F.fit, dev = Math.exp(F.y0 - fit.a) - 1, tr = fit.trend, tw = tr.slope * 7;
-  const mi = F.my.info, myNote = mi && mi.lead ? `Nächster Mayor ${until(mi.end - Date.now())}: ${esc(mi.lead.name)} führt mit ${NF0.format(mi.lead.share * 100)} % der Stimmen${mi.eff != null ? `, typische Wirkung auf dieses Item ${P(mi.eff)} (${mi.n} Amtszeiten${mi.ok ? '' : ', zu unsicher, zählt nicht'})` : ', Wirkung auf dieses Item unbekannt'}. Danach zählen die Mayors mit ihrer Häufigkeit.` : 'Wahl noch offen oder keine Daten zu den Mayors.';
-  const tot = (h) => Math.exp(F.sim.q[h - 1][3] - F.y0) - 1;
-  return card('Was die Prognose bestimmt', 'Viele Items pendeln um ihren Durchschnitt: Nach einem Sprung kommt der Preis meist zum Teil zurück, weil Spieler billig nachkaufen oder teuer abverkaufen. Trends setzen sich dagegen selten fort. Mayors verschieben Angebot und Nachfrage für bestimmte Items über eine Amtszeit.',
-    `<table class="mk-mini"><thead><tr><th class="l nosort">Einfluss</th><th class="nosort">7 Tage</th><th class="nosort">31 Tage</th></tr></thead><tbody>
-      ${row('Trend', p.trend, p.none, `${P(tw)} pro Woche in den letzten ${fit.hp.trendWin} Tagen${tr.se < Infinity ? ` (${Math.abs(tr.slope) > 2 * tr.se ? 'deutlich' : Math.abs(tr.slope) > tr.se ? 'schwach' : 'kaum vom Zufall zu unterscheiden'})` : ''}. ${fit.hp.trendW ? 'Klingt in der Prognose ab.' : 'Wird nicht fortgeschrieben: In Rückwärtstests über alle Items sagten vergangene Trends die Zukunft nicht voraus.'}`)}
-      ${row('Rückkehr zum Mittel und Schwung', p.dyn, p.trend, `jetzt ${P(dev)} ${dev >= 0 ? 'über' : 'unter'} dem gleitenden Mittel`)}
-      ${row('Mayors', p.all, p.dyn, myNote + ' Es zählt nur eine Wirkung, die in mindestens 6 Amtszeiten fast immer in dieselbe Richtung ging.')}
-      ${row('Zusammen (ohne Zufall)', p.all, p.none)}
-      <tr class="static"><td class="l"><b>Mittlerer simulierter Pfad</b><small>mit Zufall; weicht leicht ab, weil Ausschläge nicht symmetrisch sind</small></td><td>${PC(tot(7))}</td><td>${PC(tot(31))}</td></tr>
-    </tbody></table>
-    ${mkFacts([['Schwankung pro Tag jetzt', P(fit.sigN, false)], ['Schwankung pro Tag üblich', P(fit.sigL, false)], ['Rückkehr pro Tag', P(fit.k, false) + ' des Abstands'], ['Datenbasis', `${NF0.format(fit.n)} Tage`]])}`);
+  const p = F.parts, fit = F.fit, A = I.A, H = 31;
+  const ch = (a, b, h) => Math.exp(a[h - 1] - b[h - 1]) - 1;
+  const dev = Math.exp(F.y0 - fit.a) - 1, anchor = fcPx(F, side, fit.a);
+  const half = fit.k > 0 ? Math.LN2 / fit.k : Infinity;
+  const tot31 = Math.exp(F.sim.q[H - 1][3] - F.y0) - 1, tot7 = Math.exp(F.sim.q[6][3] - F.y0) - 1;
+  const mi = F.my.info;
+  const D = [
+    {id: 'rev', name: dev >= 0 ? 'Preis ist gerade hoch' : 'Preis ist gerade niedrig', a: p.rev, b: p.trend,
+     why: `Jetzt ${P(Math.abs(dev), false)} ${dev >= 0 ? 'über' : 'unter'} dem Durchschnitt der letzten Wochen (${fmt(anchor)}). ${fit.k > .002 ? `Bei diesem Item baut sich so ein Abstand meist ab, etwa zur Hälfte in ${half < 60 ? NF0.format(half) + ' Tagen' : 'mehreren Monaten'}, weil Spieler bei hohen Preisen verkaufen und bei niedrigen nachkaufen.` : 'Bei diesem Item kommt der Preis nach Ausschlägen kaum zurück; der Abstand zählt deshalb wenig.'}`},
+    {id: 'mom', name: 'Schwung der letzten Tage', a: p.dyn, b: p.rev,
+     why: d => `Letzte 7 Tage ${P(A.c7)}, gestern ${P(A.c1)}. ${Math.abs(d.c7) < .005 ? 'Für die Prognose spielt das kaum eine Rolle: Bei diesem Item sagt die letzte Bewegung wenig über die nächste.' : d.c7 > 0 ? 'Bei diesem Item setzt sich so eine Bewegung meist kurz fort; das hebt den Preis in den nächsten Tagen etwas.' : 'Daraus folgt bei diesem Item ein kleiner Rückgang in den nächsten Tagen.'} Wirkt nur wenige Tage.`},
+    {id: 'my', name: 'Mayor', a: p.all, b: p.dyn,
+     why: mi && mi.lead ? `Nächste Wahl ${until(mi.end - Date.now())}: ${esc(mi.lead.name)} führt mit ${NF0.format(mi.lead.share * 100)} %. ${mi.eff != null ? (mi.ok ? `Unter ${esc(mi.lead.name)} lag dieses Item in ${mi.n} Amtszeiten typischerweise bei ${P(mi.eff)}.` : `Unter ${esc(mi.lead.name)} war die Wirkung in ${mi.n} Amtszeiten nicht eindeutig, darum zählt sie nicht.`) : `Zur Wirkung von ${esc(mi.lead.name)} auf dieses Item gibt es keine Daten.`}` : 'Wahl noch offen oder keine Daten zu den Mayors; es zählt nur die durchschnittliche Wirkung aller Mayors.'},
+    {id: 'drift', name: 'Grundtendenz', a: p.trend, b: p.none,
+     why: `Kleine Dauer-Bewegung aus dem ganzen Verlauf. Trends der letzten Wochen (${P(fit.trend.slope * 7)} pro Woche) werden nicht fortgeschrieben: In Rückwärtstests über alle Items sagten sie die Zukunft nicht voraus.`},
+  ].map(d => { Object.assign(d, {c7: ch(d.a, d.b, 7), c31: ch(d.a, d.b, H)}); if (typeof d.why === 'function') d.why = d.why(d); return d; });
+  const mx = Math.max(.005, ...D.map(d => Math.abs(d.c31)), ...D.map(d => Math.abs(d.c7)));
+  const bar = v => `<span class="pg-bar2"><i class="${v >= 0 ? 'up' : 'dn'}" style="${v >= 0 ? 'left:50%' : `right:50%`};width:${(Math.min(Math.abs(v) / mx, 1) * 50).toFixed(1)}%"></i></span>`;
+  const top = D.slice().sort((x, y) => Math.abs(y.c31) - Math.abs(x.c31))[0];
+  const flat = Math.abs(tot31) < .01;
+  const verdict = flat ? `Die Prognose erwartet in 31 Tagen <b>kaum Veränderung</b> (${PC(tot31)}). Die Einflüsse sind klein oder heben sich auf.`
+    : `Die Prognose erwartet in 31 Tagen <b>${tot31 > 0 ? 'einen Anstieg' : 'einen Rückgang'}</b> um ${P(Math.abs(tot31), false)}, vor allem wegen „${top.name}“.`;
+  const an = fcAnalogs(F);
+  const w80 = fcDay(F, side, H), wid = (w80.q90 - w80.q10) / 2 / w80.med;
+  return `<section class="wide pg-why"><h2>Was die Prognose bestimmt</h2>
+    <p class="pg-verdict">${verdict}</p>
+    <div class="pg-drv">
+      <div class="pg-drv-h"><span></span><span>7 Tage</span><span>31 Tage</span></div>
+      ${D.map(d => `<div class="pg-drv-r"><div class="pg-drv-n"><b>${d.name}</b><small>${d.why}</small></div>
+        <div class="pg-drv-v"><span>7 Tage</span>${bar(d.c7)}${PC(d.c7)}</div><div class="pg-drv-v"><span>31 Tage</span>${bar(d.c31)}${PC(d.c31)}</div></div>`).join('')}
+      <div class="pg-drv-r sum"><div class="pg-drv-n"><b>Erwartete Veränderung</b><small>Mitte aller 2000 simulierten Verläufe. Weicht leicht von der Summe ab, weil große Sprünge nach oben häufiger sind als nach unten.</small></div>
+        <div class="pg-drv-v"><span>7 Tage</span>${bar(tot7)}${PC(tot7)}</div><div class="pg-drv-v"><span>31 Tage</span>${bar(tot31)}${PC(tot31)}</div></div>
+    </div>
+    <h3 class="mk-h4">So lief es früher in ähnlicher Lage</h3>
+    ${an ? `<p class="pg-ans">An <b>${an.n} Tagen</b> im letzten Jahr lag der Preis ähnlich weit ${dev >= 0 ? 'über' : 'unter'} seinem Durchschnitt wie jetzt. ${an.c7 != null ? `7 Tage später: im Mittel ${PC(an.c7)}` : ''}${an.c31 != null ? `, 31 Tage später: ${PC(an.c31)}` : ''}. ${an.hit != null ? `In ${NF0.format(an.hit * 100)} % dieser Fälle ${dev >= 0 ? 'war er nach 31 Tagen niedriger' : 'war er nach 31 Tagen höher'}.` : ''}</p>
+      <p class="hint">Tage, die weniger als 31 Tage auseinanderliegen, gehören oft zur selben Phase; die Fälle sind deshalb nicht ganz unabhängig.</p>`
+      : '<p class="note">Im letzten Jahr gab es zu wenige vergleichbare Tage (mindestens 8), um daraus etwas abzulesen.</p>'}
+    <h3 class="mk-h4">Warum die Bereiche so breit sind</h3>
+    <p class="note">Der Preis bewegt sich bei diesem Item an einem normalen Tag um etwa ${P(fit.sigL, false)}${fit.sigN > fit.sigL * 1.25 ? `, im Moment deutlich mehr (${P(fit.sigN, false)})` : fit.sigN < fit.sigL * .8 ? `, im Moment weniger (${P(fit.sigN, false)})` : ''}. Darum liegt der Bereich „fast sicher“ in 31 Tagen bei etwa ±${P(wid, false)} um den erwarteten Preis. Je ruhiger ein Item, desto enger die Bereiche.</p>
+    ${mkFacts([['Datenbasis', `${NF0.format(fit.n)} Tage Preisverlauf`], ['Startpreis', F.start], ['Mittelwert der letzten Wochen', fmt(anchor)], ['Rückkehr zum Mittel', fit.k > .002 ? `${P(fit.k, false)} des Abstands pro Tag` : 'kaum']])}
+  </section>`;
+}
+// Vergleichsfälle: Tage mit ähnlichem Abstand zum gleitenden Mittel, mindestens 31 Tage vor heute
+function fcAnalogs(F){
+  const y = F.y, end = F.end, a = Forecast.anchor(y.slice(0, end + 1), F.fit.hp.ha), d0 = F.y0 - F.fit.a;
+  const tol = Math.max(.02, Math.abs(d0) * .35), c7 = [], c31 = []; let hit = 0, n31 = 0;
+  for (let i = 30; i <= end - 7; i++){
+    if (y[i] == null || a[i] == null) continue;
+    const d = y[i] - a[i]; if (Math.abs(d - d0) > tol || Math.sign(d) !== Math.sign(d0) && Math.abs(d0) > tol) continue;
+    if (y[i + 7] != null) c7.push(Math.exp(y[i + 7] - y[i]) - 1);
+    if (i + 31 <= end && y[i + 31] != null){ const c = y[i + 31] - y[i]; c31.push(Math.exp(c) - 1); n31++; if (d0 >= 0 ? c < 0 : c > 0) hit++; }
+  }
+  if (c7.length < 8) return null;
+  return {n: c7.length, c7: E.median(c7), c31: c31.length >= 8 ? E.median(c31) : null, hit: n31 >= 8 ? hit / n31 : null};
 }
 function fcReliabilityHTML(I, F){
   const g = F.cfg.acc, it = I.fcBT;
@@ -225,14 +322,21 @@ function fcReliabilityHTML(I, F){
 }
 function fcRelBody(I, F){
   const g = F.cfg.acc, it = I.fcBT;
-  const rowOf = (h, a) => a && a[h] ? `<td>${NF0.format(a[h].in80 * 100)} %</td><td>${NF0.format(a[h].in50 * 100)} %</td><td>${PC(a[h].skill)}</td><td>${a[h].dir != null ? NF0.format(a[h].dir * 100) + ' %' : '–'}</td>` : '<td>–</td><td>–</td><td>–</td><td>–</td>';
-  const tbl = (a, n) => `<table class="mk-mini"><thead><tr><th class="l nosort">Horizont</th><th class="nosort">im 80-%-Bereich</th><th class="nosort">im 50-%-Bereich</th><th class="nosort">genauer als „bleibt gleich“</th><th class="nosort">Richtung richtig</th></tr></thead><tbody>
+  const st = (v, goal, tol) => v == null ? '' : Math.abs(v - goal) <= tol ? 'pos' : Math.abs(v - goal) <= tol * 2 ? 'amber' : 'neg';
+  const pc = (v, c) => `<td class="${c}">${NF0.format(v * 100)} %</td>`;
+  const rowOf = (h, a) => { const x = a && a[h]; if (!x) return '<td>–</td><td>–</td><td>–</td><td>–</td>';
+    return `${pc(x.in80, st(x.in80, .8, .07))}${pc(x.in50, st(x.in50, .5, .07))}<td class="${x.skill > .02 ? 'pos' : x.skill < -.02 ? 'neg' : ''}">${x.skill == null ? '–' : x.skill >= 0 ? NF0.format(x.skill * 100) + ' % genauer' : NF0.format(-x.skill * 100) + ' % ungenauer'}</td><td>${x.dir != null ? NF0.format(x.dir * 100) + ' %' : '–'}</td>`; };
+  const tbl = (a, n) => `<table class="mk-mini pg-rel"><thead><tr><th class="l nosort">Vorhersage für</th><th class="nosort">Preis lag im Bereich „fast sicher“ (Ziel 80 %)</th><th class="nosort">Preis lag im Bereich „wahrscheinlich“ (Ziel 50 %)</th><th class="nosort">Treffer im Vergleich zu „Preis bleibt gleich“</th><th class="nosort">Richtung (steigt oder fällt) stimmte</th></tr></thead><tbody>
     ${FCH.map(([h, l]) => `<tr class="static"><td class="l">${l.replace('In ', '')}</td>${rowOf(h, a)}</tr>`).join('')}</tbody></table>${n ? `<p class="note">${n}</p>` : ''}`;
-  return `<h4 class="mk-h4">Bei diesem Item (rückwirkend, letzte 120 Tage)</h4>
-    ${it === null || it === undefined ? '<p class="loading">Rechnet …</p>' : it.err ? `<p class="note">${it.err}</p>` : tbl(it.score, `${NF0.format(it.n)} Prognosen, jeweils nur mit den Daten bis zu diesem Tag gerechnet.`)}
-    <h4 class="mk-h4">Über alle ${I.k.bz ? 'Bazaar' : 'Auction-House'}-Items</h4>
-    ${g ? tbl(g, `${NF0.format(F.cfg.n || 0)} Prognosen aus ${I.k.bz ? 'allen Bazaar-Items' : 'den meistgehandelten Auction-House-Items'}${F.cfg.built ? `, Stand ${fdate(F.cfg.built)}` : F.cfg.dev ? ', Auswertung bei der Entwicklung (Nov. 2026)' : ''}. „Genauer als bleibt gleich“: um so viel kleiner war der mittlere Fehler als bei der Annahme, dass sich nichts ändert.`) : '<p class="note">Noch keine Auswertung vorhanden.</p>'}
-    <p class="note">Bei 50 % und 80 % sollte der echte Preis etwa so oft im Bereich liegen. Liegt er viel seltener drin, ist das Item gerade schwerer vorherzusagen als sonst.</p>`;
+  return `<h4 class="mk-h4">Bei diesem Item: frühere Prognosen nachgeprüft (letzte 120 Tage)</h4>
+    ${it === null || it === undefined ? '<p class="loading">Rechnet …</p>' : it.err ? `<p class="note">${it.err}</p>` : tbl(it.score, `${NF0.format(it.n)} Prognosen, jede nur mit den Daten bis zu ihrem Tag gerechnet und dann mit dem echten Preis verglichen.`)}
+    <h4 class="mk-h4">Bei allen ${I.k.bz ? 'Bazaar' : 'Auction-House'}-Items</h4>
+    ${g ? tbl(g, `${NF0.format(F.cfg.n || 0)} Prognosen aus ${I.k.bz ? 'allen Bazaar-Items' : 'den meistgehandelten Auction-House-Items'}${F.cfg.built ? `, Stand ${fdate(F.cfg.built)}` : F.cfg.dev ? ', Auswertung bei der Entwicklung (Nov. 2026)' : ''}.`) : '<p class="note">Noch keine Auswertung vorhanden.</p>'}
+    <dl class="pg-gloss">
+      <div><dt>Bereich „fast sicher“ / „wahrscheinlich“</dt><dd>Wie oft der echte Preis später wirklich in diesem Bereich lag. Gut ist, wenn das nah am Ziel (80 % bzw. 50 %) ist. <span class="pos">Grün</span> = passt, <span class="amber">Gelb</span> = etwas daneben, <span class="neg">Rot</span> = deutlich daneben (das Item ist gerade schwerer vorherzusagen als sonst).</dd></div>
+      <div><dt>Im Vergleich zu „Preis bleibt gleich“</dt><dd>Die einfachste Vorhersage ist: Der Preis bleibt, wie er ist. „20 % genauer“ heißt, die Prognose lag im Mittel um ein Fünftel näher am echten Preis.</dd></div>
+      <div><dt>Richtung stimmte</dt><dd>Wie oft die Prognose richtig sagte, ob der Preis steigt oder fällt. 50 % wäre Raten.</dd></div>
+    </dl>`;
 }
 function fcBacktest(I, F){
   const y = F.y, end = F.end, cfg = F.cfg, origins = [];

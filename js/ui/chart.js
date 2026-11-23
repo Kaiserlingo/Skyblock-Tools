@@ -71,6 +71,7 @@ class PriceChart {
     this.drawings = []; this.history = []; this.tool = 'none'; this.pending = null; this.measure = null;
     this.mouse = null; this.pan = null; this.onChange = null; this.onHover = null; this.empty = 'Keine Daten';
     this.bands = []; this.marks = []; this.labels = {hi: 'Instabuy', lo: 'Instasell'}; this.fmt = fp;
+    this.fc = null; this.onHoverFc = null;
     this.cv.addEventListener('pointerdown', e => this._down(e));
     this.cv.addEventListener('pointermove', e => this._move(e));
     this.cv.addEventListener('pointerup', e => this._up(e));
@@ -98,13 +99,19 @@ class PriceChart {
     if (this.follow) this._followEnd();
     this._calc(); this.draw();
   }
-  _followEnd(){ const t = this.data.t; if (!t.length || !this.view) return; const span = this.view[1] - this.view[0]; this.view = [t[t.length-1] - span, t[t.length-1]]; }
+  // Anfang und Ende aller Daten (Verlauf und Prognose)
+  _start(){ const t = this.data.t; return t.length ? t[0] : this.fc ? this.fc.t[0] : null; }
+  _end(){ const t = this.data.t, a = t.length ? t[t.length - 1] : null, b = this.fc ? this.fc.t[this.fc.t.length - 1] : null; return a == null ? b : b == null ? a : Math.max(a, b); }
+  _followEnd(){ const e = this._end(); if (e == null || !this.view) return; const span = this.view[1] - this.view[0]; this.view = [e - span, e]; }
   resetView(silent){
-    const t = this.data.t;
-    this.view = t.length > 1 ? [t[0], t[t.length - 1]] : t.length ? [t[0] - HR/2, t[0] + HR/2] : [Date.now() - HR, Date.now()];
+    const a = this._start(), b = this._end();
+    this.view = a != null && b > a ? [a, b] : a != null ? [a - HR/2, a + HR/2] : [Date.now() - HR, Date.now()];
     this.follow = true;
     if (!silent) this.draw();
   }
+  /* Prognose: f = {t: [...], med, q10, q25, q75, q90} (Preise je Zeitpunkt, erster Punkt = jetzt).
+     Wird rechts an den Verlauf angehängt: 80-%-Band, 50-%-Band und gestrichelte Mittellinie. */
+  setForecast(f, keepView){ this.fc = f && f.t && f.t.length ? f : null; if (!keepView) this.resetView(true); this.draw(); }
   // Hintergrund-Zeiträume (z. B. Mayor-Amtszeiten) und senkrechte Marken (z. B. Updates)
   setOverlays({bands, marks} = {}){ if (bands) this.bands = bands; if (marks) this.marks = marks; this.draw(); }
   setIndicators(o){ Object.assign(this.ind, o); this._calc(); this.draw(); }
@@ -161,12 +168,13 @@ class PriceChart {
     while (i0 < d.t.length - 1 && d.t[i0 + 1] < v0) i0++;
     while (i1 > 0 && d.t[i1 - 1] > v1) i1--;
     this.vis = [i0, i1];
-    if (!d.t.length){ c.fillStyle = col.muted; c.textAlign = 'center'; c.fillText(this.empty, W/2, H/2); this.yr = [0, 1]; return; }
+    if (!d.t.length && !this.fc){ c.fillStyle = col.muted; c.textAlign = 'center'; c.fillText(this.empty, W/2, H/2); this.yr = [0, 1]; return; }
     // y-Bereich
     let mn = Infinity, mx = -Infinity;
     const take = arr => { if (!arr) return; for (let i = i0; i <= i1; i++){ const v = arr[i]; if (v != null && isFinite(v)){ if (v < mn) mn = v; if (v > mx) mx = v; } } };
     if (this.ind.hi) take(d.hi); if (this.ind.lo) take(d.lo); if (!this.ind.hi && !this.ind.lo) take(this.mid);
     take(this.smaL); take(this.emaL); if (this.bbL){ take(this.bbL.up); take(this.bbL.lo); }
+    if (this.fc){ const f = this.fc; for (let k = 0; k < f.t.length; k++){ if (f.t[k] < v0 || f.t[k] > v1) continue; for (const a of [f.q10, f.q90, f.med]){ const v = a[k]; if (v != null && isFinite(v)){ if (v < mn) mn = v; if (v > mx) mx = v; } } } }
     if (!isFinite(mn)){ mn = 0; mx = 1; }
     if (mn === mx){ mn *= .995; mx *= 1.005; if (mn === mx){ mn -= 1; mx += 1; } }
     const pad = (mx - mn) * .08; this.yr = [mn - pad, mx + pad];
@@ -255,6 +263,8 @@ class PriceChart {
       }
       c.fillStyle = col.muted; c.textAlign = 'left'; c.fillText('Volumen', g.L + 4, g.volT + 8);
     }
+    // Prognose
+    if (this.fc) this._drawForecast();
     // Zeichnungen
     for (const dr of this.drawings) this._drawItem(dr, false);
     if (this.pending && this.mouse) this._drawItem({...this.pending, p: [this.pending.p[0], {t: this.Tm(this.mouse.x), price: this.P(this.mouse.y)}]}, true);
@@ -263,12 +273,17 @@ class PriceChart {
 
     // letzte Preise als Marken an der Achse
     const lastIdx = d.t.length - 1;
+    if (this.fc){ const f = this.fc, k = f.t.length - 1; if (f.t[k] <= v1) this._tag(this.Y(f.med[k]), fp(f.med[k]), col.draw); }
     if (this.ind.lo && d.lo[lastIdx] != null) this._tag(this.Y(d.lo[lastIdx]), fp(d.lo[lastIdx]), col.emerald);
     if (this.ind.hi && d.hi[lastIdx] != null) this._tag(this.Y(d.hi[lastIdx]), fp(d.hi[lastIdx]), col.amber);
     for (const dr of this.drawings) if (dr.type === 'hline') this._tag(this.Y(dr.p[0].price), fp(dr.p[0].price), col.draw);
 
     // Fadenkreuz
-    if (this.mouse && this._inPlot(this.mouse) && !this.pan){
+    const wasFc = this._fcPrev = this._fcK; this._fcK = null;
+    const lastT = d.t.length ? d.t[d.t.length - 1] : -Infinity;
+    if (this.mouse && this._inPlot(this.mouse) && !this.pan && this.fc && this.Tm(this.mouse.x) > lastT + (this.fc.t[1] - this.fc.t[0]) / 3){
+      this._hoverForecast(this.mouse);
+    } else if (this.mouse && this._inPlot(this.mouse) && !this.pan && d.t.length){
       const m = this.mouse, idx = this._near(m.x), x = idx >= 0 ? this.X(d.t[idx]) : m.x;
       c.strokeStyle = col.muted; c.setLineDash([3, 3]); c.lineWidth = 1;
       c.beginPath(); c.moveTo(Math.round(x) + .5, g.T); c.lineTo(Math.round(x) + .5, g.volB); c.stroke();
@@ -283,6 +298,41 @@ class PriceChart {
         if (this.onHover) this.onHover(idx); else this._tooltip(idx, x);
       }
     } else this.tip.style.display = 'none';
+    if (wasFc != null && this._fcK == null && this.onHoverFc) this.onHoverFc(null);
+  }
+  _drawForecast(){
+    const c = this.ctx, g = this.g, f = this.fc, col = this.col, n = f.t.length;
+    const path = (a, b) => { c.beginPath(); for (let k = 0; k < n; k++) c.lineTo(this.X(f.t[k]), this.Y(a[k])); for (let k = n - 1; k >= 0; k--) c.lineTo(this.X(f.t[k]), this.Y(b[k])); c.closePath(); };
+    c.fillStyle = col.draw; c.globalAlpha = .12; if (f.show80 !== false){ path(f.q10, f.q90); c.fill(); }
+    c.globalAlpha = .22; if (f.show50 !== false){ path(f.q25, f.q75); c.fill(); } c.globalAlpha = 1;
+    c.strokeStyle = col.draw; c.lineWidth = 2; c.setLineDash([6, 4]); c.beginPath();
+    for (let k = 0; k < n; k++) c.lineTo(this.X(f.t[k]), this.Y(f.med[k])); c.stroke(); c.setLineDash([]);
+    // „jetzt“
+    const x0 = Math.round(this.X(f.t[0])) + .5;
+    c.strokeStyle = col.muted; c.lineWidth = 1; c.setLineDash([2, 3]); c.beginPath(); c.moveTo(x0, g.T); c.lineTo(x0, g.volB); c.stroke(); c.setLineDash([]);
+    c.font = '600 11px ' + (css('--font') || 'sans-serif'); c.fillStyle = col.muted; c.textAlign = 'left'; c.fillText('jetzt · Prognose →', x0 + 5, g.T + 8);
+    c.font = '11.5px ' + (css('--font') || 'sans-serif');
+  }
+  _hoverForecast(m){
+    const c = this.ctx, g = this.g, f = this.fc, col = this.col, t = this.Tm(m.x);
+    let k = 0; for (let i = 1; i < f.t.length; i++) if (Math.abs(f.t[i] - t) < Math.abs(f.t[k] - t)) k = i;
+    const x = this.X(f.t[k]);
+    c.strokeStyle = col.muted; c.setLineDash([3, 3]); c.lineWidth = 1;
+    c.beginPath(); c.moveTo(Math.round(x) + .5, g.T); c.lineTo(Math.round(x) + .5, g.volB); c.stroke();
+    c.beginPath(); c.moveTo(g.L, Math.round(m.y) + .5); c.lineTo(g.L + g.pw, Math.round(m.y) + .5); c.stroke(); c.setLineDash([]);
+    this._tag(m.y, fp(this.P(m.y)), col.ink);
+    // senkrechte Spanne 80 % und 50 % an diesem Tag
+    c.strokeStyle = col.draw; c.lineWidth = 3; c.globalAlpha = .35; c.beginPath(); c.moveTo(x, this.Y(f.q10[k])); c.lineTo(x, this.Y(f.q90[k])); c.stroke();
+    c.globalAlpha = .7; c.beginPath(); c.moveTo(x, this.Y(f.q25[k])); c.lineTo(x, this.Y(f.q75[k])); c.stroke(); c.globalAlpha = 1;
+    c.fillStyle = col.draw; c.beginPath(); c.arc(x, this.Y(f.med[k]), 4, 0, 7); c.fill();
+    const tl = new Date(f.t[k]).toLocaleDateString('de-AT', {weekday: 'short', day: '2-digit', month: '2-digit'});
+    c.font = '11px ' + (css('--font') || 'sans-serif'); const tw = c.measureText(tl).width + 12;
+    c.fillStyle = col.draw; c.fillRect(Math.min(Math.max(x - tw/2, g.L), g.L + g.pw - tw), g.H - g.B + 3, tw, 18);
+    c.fillStyle = col.surface; c.textAlign = 'center'; c.fillText(tl, Math.min(Math.max(x, g.L + tw/2), g.L + g.pw - tw/2), g.H - g.B + 12);
+    const rel = k === 0 ? 'jetzt' : k === 1 ? 'morgen' : `in ${k} Tagen`;
+    this.tip.innerHTML = `<b>${rel}</b> · ${new Date(f.t[k]).toLocaleDateString('de-AT', {weekday: 'short', day: 'numeric', month: 'short'})}<br><span class="m">erwartet ${fp(f.med[k])}</span><br>wahrscheinlich ${fp(f.q25[k])} – ${fp(f.q75[k])}<br>fast sicher ${fp(f.q10[k])} – ${fp(f.q90[k])}`;
+    this.tip.style.display = 'block'; const w = this.tip.offsetWidth; this.tip.style.left = (x + 14 + w > g.L + g.pw ? x - w - 14 : x + 14) + 'px'; this.tip.style.top = (g.T + 6) + 'px';
+    this._fcK = k; if (this._fcPrev !== k && this.onHoverFc) this.onHoverFc(k);
   }
   _segments(i0, i1, ok, fn){
     let a = null; const d = this.data;
@@ -404,15 +454,15 @@ class PriceChart {
   }
   _up(){ if (this.pan){ this.pan = null; this.cv.style.cursor = 'grab'; this.draw(); } }
   _wheel(e){
-    if (!this.data.t.length) return;
+    if (!this.data.t.length && !this.fc) return;
     e.preventDefault();
     const pt = this._pt(e), tc = this.Tm(Math.max(this.g.L, Math.min(pt.x, this.g.L + this.g.pw)));
-    const f = Math.exp(e.deltaY * 0.0015), t = this.data.t;
-    const full = Math.max(t[t.length - 1] - t[0], 10 * MIN), minSpan = Math.max(5 * MIN, (this.gap || MIN) * 2);
+    const f = Math.exp(e.deltaY * 0.0015), t = this.data.t.length ? this.data.t : this.fc.t;
+    const full = Math.max(this._end() - this._start(), 10 * MIN), minSpan = Math.max(5 * MIN, (this.gap || MIN) * 2);
     let span = Math.min(Math.max((this.view[1] - this.view[0]) * f, minSpan), full * 1.1);
     const r = (tc - this.view[0]) / (this.view[1] - this.view[0]);
     this.view = [tc - r * span, tc + (1 - r) * span];
-    this.follow = this.view[1] >= t[t.length - 1];
+    this.follow = this.view[1] >= this._end();
     this.draw();
   }
   _askText(pt, at){

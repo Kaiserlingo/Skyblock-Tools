@@ -110,6 +110,28 @@ async def main():
             if tgt:
                 await pg.fill('#pg-target', str(tgt)); await pg.wait_for_timeout(600)
                 res = await pg.inner_text('#pg-tres')
+            if tgt:
+                # Prognose-Diagramm: Maus über den Prognose-Teil -> Legende zeigt diesen Tag
+                await pg.locator('#pg-chart').scroll_into_view_if_needed(); box = await pg.locator('#pg-chart canvas').first.bounding_box()
+                if not box: PROBLEMS.append(f'Prognose {fid}: kein Diagramm')
+                else:
+                    await pg.mouse.move(box['x'] + box['width'] * .85, box['y'] + box['height'] * .4); await pg.wait_for_timeout(200)
+                    leg = await pg.inner_text('#pg-legend'); print('   legend', leg[:160].replace('\n', ' / '))
+                    if 'Erwartet' not in leg or 'idle' in (await pg.get_attribute('#pg-legend .pg-leg', 'class') or ''): PROBLEMS.append(f'Prognose {fid}: Legende folgt der Maus nicht')
+                    await pg.mouse.move(10, 10)
+                for v in ['180', '7', '31']: await pg.click(f'[data-cp="pg"][data-cprange2="{v}"]'); await pg.wait_for_timeout(150)
+                for r in ['7d', '1y', '30d']: await pg.click(f'[data-cp="pg"][data-cprange="{r}"]'); await pg.wait_for_timeout(150)
+                n = await pg.evaluate("(()=>{const c=ChartPanels.pg.chart; return [c.data.t.length, c.fc?c.fc.t.length:0]})()"); print('   pg chart pts', n)
+                if n[0] < 3 or n[1] != 32: PROBLEMS.append(f'Prognose {fid}: Diagramm {n}')
+                d = await pg.evaluate("new Date(Date.now()+10*864e5).toISOString().slice(0,10)")
+                await pg.fill('#pg-date', d); await pg.wait_for_timeout(200)
+                dr = await pg.inner_text('#pg-dres'); print('   date', dr[:200].replace('\n', ' / '))
+                if 'in 10 Tagen' not in dr: PROBLEMS.append(f'Prognose {fid}: Datum {dr[:80]}')
+                await pg.evaluate("document.querySelector('.pg-days').open=true"); await pg.wait_for_timeout(200)
+                print('   days rows', await pg.locator('.pg-tbl tbody tr').count())
+                # Live-Update darf das Diagramm nicht neu anlegen
+                c0 = await pg.evaluate("ChartPanels.pg.chart.__id = 1"); await pg.evaluate("drawItem(true)")
+                if not await pg.evaluate("ChartPanels.pg.chart.__id === 1"): PROBLEMS.append(f'Prognose {fid}: Live-Update zeichnet Diagramm neu')
             await pg.wait_for_timeout(1500)
             rel = await pg.inner_text('#pg-rel') if await pg.locator('#pg-rel').count() else ''
             dbg = await pg.evaluate("(()=>{const F=Markt._K.it.fc; if(!F||F.err) return null; const f=F.fit; return {k:f.k,f:f.f,m:f.m,sigL:f.sigL,sigN:f.sigN,n:f.n,y0:F.y0,q:[0,6,30,89,179].map(d=>F.sim.q[d].map(x=>+(x-F.y0).toFixed(3))), up:[0,6,30,179].map(d=>F.sim.up[d])}})()")
@@ -141,7 +163,13 @@ async def main():
             await pg.click(f'[data-mitab="{t}"]'); await pg.wait_for_timeout(300)
             txt = await pg.inner_text('#mi-body'); print('itab', t, len(txt), [w for w in ['NaN','undefined','Infinity'] if w in txt])
             await pg.screenshot(path=f'{OUT}/itab_{t}.png', full_page=True)
-        for r in ['7d','all','1y']: await pg.click(f'[data-mirange="{r}"]'); await pg.wait_for_timeout(600)
+        for r in ['24h','7d','30d','90d','all','1y']:
+            await pg.click(f'[data-cp="mi"][data-cprange="{r}"]'); await pg.wait_for_timeout(700)
+            print('mi range', r, await pg.evaluate("Markt._K.chart ? Markt._K.chart.data.t.length : -1"))
+        await pg.click('[data-cp="mi"][data-cptool="hline"]'); box = await pg.locator('#mi-chart canvas').first.bounding_box()
+        await pg.mouse.click(box['x'] + box['width'] * .5, box['y'] + box['height'] * .4); await pg.wait_for_timeout(200)
+        print('mi drawings', await pg.evaluate("Markt._K.chart.drawings.length"))
+        await pg.click('[data-cp="mi"][data-cpact="clear"]')
         if await pg.locator('[data-mkmob=insta]').count(): await pg.click('[data-mkmob=insta]'); await pg.wait_for_timeout(300)
         inp = pg.locator('[data-mkcalc=budget]')
         if await inp.count(): await inp.fill('50m'); await inp.press('Enter'); await pg.wait_for_timeout(300)

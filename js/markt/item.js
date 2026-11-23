@@ -9,13 +9,8 @@ function pageItem(){
     <p class="crumbline"><a class="link" href="#markt/items">Alle Items</a></p>
     <div id="mi-head">${itemHead(id)}</div>
     <section class="mk-block">
-      <header><h2>Preisverlauf</h2>
-        <div class="seg sm" role="group" aria-label="Zeitraum">${[['7d', '7 Tage'], ['1y', '1 Jahr'], ['all', 'Alles']].map(([k, l]) => `<button data-mirange="${k}" class="${K.itRange === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <label class="chk"><input type="checkbox" data-miopt="bands" ${K.itBands ? 'checked' : ''}> Mayor-Amtszeiten</label>
-        <label class="chk"><input type="checkbox" data-miopt="marks" ${K.itMarks ? 'checked' : ''}> Updates</label>
-      </header>
-      <div class="mk-chart tall" id="mi-chart"></div>
-      <p class="hint" id="mi-cnote"></p>
+      <header><h2>Preisverlauf</h2></header>
+      ${miPanel().html()}
     </section>
     <div id="mi-body"><p class="loading">Daten werden geladen …</p></div>
   </div>`;
@@ -40,8 +35,8 @@ function itemHead(id){
 async function mountItem(){
   const id = S.itemId, I = K.it = {id, ready: false, err: [], series: {}};
   if (K.chart){ K.chart.destroy(); K.chart = null; }
-  const el = $('#mi-chart');
-  if (el){ const ch = K.chart = new PriceChart(el, {}); ch.empty = 'Lädt …'; ch.setIndicators({hi: true, lo: true, spread: true, volume: true}); }
+  const ch = K.chart = miPanel().mount();
+  if (ch){ ch.empty = 'Lädt …'; ch.setIndicators(miInd()); }
   await Promise.allSettled([loadMD(), loadHy(), loadCat(), K.liveP]);
   if (K.it !== I) return;
   const k = I.k = kind(id);
@@ -86,34 +81,61 @@ function soldStats(a){
   return {n: s.length, span, perDay: s.length / span, q10: E.quantile(ps, .1), q50: E.median(ps), q90: E.quantile(ps, .9), cleanN: clean.length, cleanMed: E.median(clean),
           cv: E.sd(ps) / E.mean(ps), sellers: shares.length, hhi: shares.reduce((x, y) => x + y * y, 0), top: Math.max(...shares), list: s};
 }
+// Zeiträume wie im Bazaar Flipper (RANGES) – Bazaar-Items laden über loadHistory, AH-Items schneiden die geladene Historie zu
+const MI_RANGES = ['24h', '7d', '30d', '90d', '1y', 'all'].map(k => [k, RANGES[k].label]);
+function miPanel(){
+  const p = ChartPanels.mi;
+  if (p && p.o.id === S.itemId) return p;
+  if (!MI_RANGES.some(r => r[0] === K.itRange)) K.itRange = '1y';
+  return new ChartPanel('mi', {
+    id: S.itemId, ranges: MI_RANGES, range: K.itRange,
+    onRange: r => { K.itRange = r; feedItemChart(); },
+    checks: [['bands', 'Mayor-Amtszeiten', K.itBands, 'k-mayor'], ['marks', 'Updates', K.itMarks],
+             ['spread', 'Spread', K.itInd.spread], ['volume', 'Volumen', K.itInd.volume],
+             ['sma', 'SMA 20', K.itInd.sma, 'k-sma'], ['ema', 'EMA 10', K.itInd.ema, 'k-ema'], ['bb', 'Bollinger', K.itInd.bb, 'k-bb']],
+    onCheck: (k, on) => {
+      if (k === 'bands') K.itBands = on; else if (k === 'marks') K.itMarks = on; else K.itInd[k] = on;
+      if (k === 'bands' || k === 'marks') feedItemChart(); else if (K.chart) K.chart.setIndicators(miInd());
+    },
+    drawKey: () => 'draw:markt:' + S.itemId,
+  });
+}
+function miInd(){ const x = K.itInd; return {hi: true, lo: true, spread: x.spread, volume: x.volume, sma: x.sma ? 20 : 0, ema: x.ema ? 10 : 0, bb: x.bb}; }
+function miPts(I, r){
+  const span = RANGES[r].span, from = Date.now() - span;
+  if (r === '24h') return (I.h7 || []).filter(p => p.t >= from);
+  if (r === '7d') return I.h7 || [];
+  if (r === 'all') return I.hAll || [];
+  return (I.hAll || I.h1 || []).filter(p => p.t >= from);
+}
 function feedItemChart(){
   const ch = K.chart, I = K.it; if (!ch || !I || !I.ready) return;
   const r = K.itRange, md = K.md;
-  let pts = r === '7d' ? I.h7 : r === 'all' ? I.hAll : I.h1;
-  if (r === 'all' && !I.hAll && I.k.bz){
-    ch.empty = 'Lädt …'; ch.setData({t: []});
-    coflAll(I.id)
-      .then(h => { if (K.it !== I) return; I.hAll = bzPoints(h); feedItemChart(); }).catch(() => { ch.empty = 'Konnte nicht geladen werden'; ch.setData({t: []}); });
-    return;
-  }
-  pts = pts || [];
-  ch.empty = I.k.bz || I.k.ah ? 'Keine Daten für diesen Zeitraum' : 'Für dieses Item gibt es keinen Markt';
+  ch.setIndicators(miInd());
   if (I.k.bz){
-    ch.labels = {hi: 'Instabuy', lo: 'Instasell'};
-    ch.setIndicators({hi: true, lo: true, spread: true, volume: true});
-    ch.setData({t: pts.map(p => p.t), hi: pts.map(p => p.buy), lo: pts.map(p => p.sell), vb: pts.map(p => p.sv ?? null), vs: pts.map(p => p.bv ?? null)});
-    const lr = liveRow(I.id), q = S.products[I.id] && S.products[I.id].quick_status;
-    if (lr && S.lastUpdated && r !== 'all' && q) ch.append({t: S.lastUpdated, hi: q.buyPrice || lr.topSell || null, lo: q.sellPrice || lr.topBuy || null, vb: q.sellVolume, vs: q.buyVolume});
+    ch.labels = {hi: 'Instabuy', lo: 'Instasell'}; ch.cofl = true;
+    ch.empty = 'Lädt …'; if (!ch.data || !ch.data.t.length) ch.setData({t: []});
+    loadHistory(I.id, r).then(res => {
+      if (K.it !== I || K.itRange !== r || K.chart !== ch) return;
+      ch.empty = 'Keine Daten für diesen Zeitraum';
+      ch.setData(res.data);
+      if (r !== 'all') livePoint(ch, I.id);
+      miOverlays(ch, md);
+      if (res.error) ch.empty = 'Konnte nicht geladen werden';
+    });
   } else {
+    const pts = miPts(I, r);
+    ch.empty = I.k.ah ? 'Keine Daten für diesen Zeitraum' : 'Für dieses Item gibt es keinen Markt';
     ch.labels = {hi: 'Ø Verkaufspreis', lo: 'günstigster Verkauf'};
-    ch.setIndicators({hi: true, lo: true, spread: true, volume: true});
     ch.setData({t: pts.map(p => p.t), hi: pts.map(p => p.avg), lo: pts.map(p => p.min), vb: pts.map(p => p.vol), vs: pts.map(() => null)});
+    miOverlays(ch, md);
   }
+  ChartPanels.mi.note((I.k.bz ? 'Bernstein: Instabuy (niedrigste Sell-Offer), Grün: Instasell (höchste Buy-Order). Unten: Menge in Sell-Offers und Buy-Orders.'
+    : 'Bernstein: Ø Verkaufspreis, Grün: günstigster Verkauf. Unten: Zahl der Verkäufe. Die Kennzahlen rechnen mit dem Ø Verkaufspreis pro Tag (Ausreißer gefiltert), weil der günstigste Verkauf oft ein beschädigtes oder falsch eingestelltes Exemplar ist.') + ' Zeichnungen werden pro Item in diesem Browser gespeichert. Prices provided by SkyCofl.');
+}
+function miOverlays(ch, md){
   ch.setOverlays({bands: K.itBands && md ? md.terms.map(x => ({from: x.start, to: x.end, label: x.name, color: bandColor(x.name), alpha: .5})) : [],
                   marks: K.itMarks && md ? md.news.map(x => ({t: x.date, label: x.title.replace(/^SkyBlock\s*/, '')})) : []});
-  const note = $('#mi-cnote');
-  if (note) note.innerHTML = (I.k.bz ? 'Bernstein: Instabuy (niedrigste Sell-Offer), Grün: Instasell (höchste Buy-Order). Unten: Menge in Sell-Offers und Buy-Orders.'
-    : 'Bernstein: Ø Verkaufspreis, Grün: günstigster Verkauf. Unten: Zahl der Verkäufe. Die Kennzahlen rechnen mit dem Ø Verkaufspreis pro Tag (Ausreißer gefiltert), weil der günstigste Verkauf oft ein beschädigtes oder falsch eingestelltes Exemplar ist.') + ' Mausrad zoomt, Ziehen verschiebt, Doppelklick zeigt alles. Prices provided by SkyCofl.';
 }
 
 /* ---------- Kennzahlen eines Items ---------- */
@@ -165,6 +187,10 @@ function drawItem(liveOnly){
   const body = $('#mi-body'); if (!body) return;
   if (liveOnly && body.contains(document.activeElement) && document.activeElement.matches('input,select')) return;
   if (!liveOnly || !I.A) I.A = analyze(I);
+  // Prognose-Reiter: bei Live-Updates nur neu zeichnen, wenn sich die Prognose geändert hat (sonst gingen Zoom und Zeichenstand verloren)
+  const pg = K.itTab === 'forecast' && ChartPanels.pg && ChartPanels.pg.o.id === I.id && ChartPanels.pg.alive() ? ChartPanels.pg : null;
+  if (liveOnly && pg && pg.fcRef === fcGet(I) && pg.side === K.fcSide) return;
+  const pv = pg && pg.chart.view ? pg.chart.view.slice() : null;
   document.title = nm(I.id) + ' – Analyse – SkyBlock Tools';
   if (!I.k.bz && !I.k.ah){
     body.innerHTML = `<p class="muted-note">${I.k.known ? 'Dieses Item kann man weder im Bazaar noch im Auction House handeln (z. B. Soulbound). Es gibt dafür keinen Marktpreis.' : 'Dieses Item kennt weder Hypixel noch SkyCofl. Prüf die ID.'}</p>${chainHTML(I)}`;
@@ -175,6 +201,7 @@ function drawItem(liveOnly){
     <nav class="mk-itabs" role="tablist" aria-label="Analyse">${ITABS.map(t => `<button role="tab" data-mitab="${t.id}" class="${K.itTab === t.id ? 'on' : ''}" aria-selected="${K.itTab === t.id}">${t.label}<small>${t.sub}</small></button>`).join('')}</nav>
     <div class="mk-itab">${(ITABS.find(t => t.id === K.itTab) || ITABS[0]).html(I)}</div>
     <p class="hint">${mdNote()} ${I.k.bz ? 'Live-Werte aus dem Bazaar, Verläufe von SkyCofl.' : 'Lowest BIN aus allen Hypixel-Auktionen, Verläufe und Verkäufe von SkyCofl.'} Prices provided by SkyCofl.</p>`;
+  if (K.itTab === 'forecast' && ChartPanels.pg){ pgMount(pv); ChartPanels.pg.fcRef = I.fc; ChartPanels.pg.side = K.fcSide; }
 }
 // Unterteilung der Item-Analyse
 const ITABS = [

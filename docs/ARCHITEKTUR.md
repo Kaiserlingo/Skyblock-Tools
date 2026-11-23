@@ -29,7 +29,8 @@ js/lib/               Rechenkerne ohne DOM – laufen im Browser UND in Node (Pi
   econ.js               Markt-Kennzahlen: Tagesreihen, Index, Renditen, Risiko, Elastizität, Kalender
   forecast.js           Preisprognose: Modell, Simulation, Zielpreis, Rückwärtstest, Kalibrierung
   categories.js         Kategorien aller Items
-js/ui/chart.js        Preis-Diagramm mit Zoom und Zeichenwerkzeugen
+js/ui/chart.js        Preis-Diagramm mit Zoom, Zeichenwerkzeugen und Prognose-Fächer (setForecast)
+js/ui/chart-panel.js  ChartPanel: Diagramm + Zeitraum, Optionen, Zeichenleiste, Legende – für alle Verlaufsdiagramme
 js/bazaar/            Bereich „Bazaar Flipper“
   state.js              Strategien, Einstellungen, gemeinsamer Zustand S
   compute.js            jede Bazaar-Zeile berechnen (Gewinn, Profit/h, Risiken, Spread-Verlauf)
@@ -114,3 +115,7 @@ tools/publish.sh "Text"   stempeln, prüfen, committen, pushen
 ```
 Nach jedem Push läuft `tests.yml` auf GitHub dieselben Prüfungen.
 Die Pipeline-Workflows lassen sich unter „Actions“ von Hand starten (`market-data.yml` dauert ~10 min).
+
+
+## Rezept: neues Verlaufsdiagramm
+`const p = new ChartPanel('xy', {ranges, range, onRange, checks, onCheck, drawKey})`, `p.html()` in die Seite, danach `p.mount()` → PriceChart. Zeiträume aus `RANGES` (js/bazaar/history.js), damit überall dieselben Stufen (24 h … Alles) stehen. Beispiele: `miPanel` (js/markt/item.js), `pgPanel` (js/markt/forecast-view.js).

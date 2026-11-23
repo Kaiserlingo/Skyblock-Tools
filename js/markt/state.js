@@ -32,7 +32,7 @@ const K = {
   chart: null, timer: null,
   list: {q: '', mkt: 'all', sec: 'all', sort: 'to', dir: -1, page: 0, preset: null},
   idx: {range: 365, bands: true, marks: true, cmp: ''},
-  it: null, itTab: 'forecast', fcSide: null, fcView: 31, fcTarget: '', itRange: '1y', itBands: true, itMarks: true, mob: 'order', calc: {budget: 10e6, share: 10},
+  it: null, itTab: 'forecast', fcSide: null, fcView: 31, fcHist: '30d', fcB50: true, fcB80: true, fcDate: '', fcDays: false, fcTarget: '', itRange: '1y', itBands: true, itMarks: true, itInd: {spread: true, volume: true, sma: false, ema: false, bb: false}, mob: 'order', calc: {budget: 10e6, share: 10},
 };
 try{ Object.assign(K.calc, JSON.parse(localStorage.getItem('mk:calc') || '{}')); }catch{}
 

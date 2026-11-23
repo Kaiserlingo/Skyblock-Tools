@@ -25,3 +25,4 @@ let fitQ = 0;
 const fitSoon = () => { if (!fitQ) fitQ = requestAnimationFrame(() => { fitQ = 0; fitTables(); }); };
 new MutationObserver(fitSoon).observe(document.body, {childList: true, subtree: true});
 addEventListener('resize', fitSoon);
+document.addEventListener('toggle', fitSoon, true);   // aufgeklappte <details> neu messen
