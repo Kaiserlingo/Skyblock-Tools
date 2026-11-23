@@ -11,7 +11,7 @@
 (function(){
 const wait = ms => new Promise(r => setTimeout(r, ms));
 async function until(f, ms = 25000){ const t0 = Date.now(); while (Date.now() - t0 < ms){ try{ if (f()) return true; }catch(e){} await wait(250); } return false; }
-const go = async (hash, ready, ms) => { location.hash = hash; await wait(400); return until(ready, ms); };
+const go = async (hash, ready, ms) => { window.__auditStep = hash; location.hash = hash; await wait(400); return until(ready, ms); };
 const num = v => v != null && isFinite(v);
 
 window.siteAudit = async function(opt = {}){
@@ -100,6 +100,7 @@ window.siteAudit = async function(opt = {}){
       }catch(e){}
     }
     // Prognose: alle Darstellungen zeigen dieselben Zahlen
+    window.__auditStep = 'Prognose ' + id;
     const F = I.fc;
     if (F && !F.err && ChartPanels.pg && ChartPanels.pg.chart){
       for (const s of F.sides.list){
@@ -126,6 +127,7 @@ window.siteAudit = async function(opt = {}){
         scan('Prognose ' + tag);
       }
     }
+    window.__auditStep = 'Reiter ' + id;
     for (const t of ITABS){ const b = document.querySelector(`[data-mitab="${t.id}"]`); if (b){ b.click(); await wait(250); scan(`#markt/item/${id} ${t.id}`); } }
     const fb = document.querySelector('[data-mitab="forecast"]'); if (fb) fb.click();
     // dieselbe Zahl im Bazaar Flipper (Analyse-Seite)
