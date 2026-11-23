@@ -1,0 +1,32 @@
+"""Live-Prüfung der Oberfläche mit echten Daten: öffnet die Website (aktueller Stand des Repositorys)
+mit echtem Internet, führt tests/live/audit_page.js aus und schreibt das Ergebnis.
+
+    python3 tests/live/audit_ui.py bericht.json [Anzahl Bazaar-Items]
+"""
+import asyncio, json, os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from web import serve, launch
+from playwright.async_api import async_playwright
+
+async def main(out, n):
+    async with async_playwright() as p:
+        b = await launch(p)
+        pg = await b.new_page(viewport={'width': 1300, 'height': 900})
+        errs = []
+        pg.on('pageerror', lambda e: errs.append(str(e)))
+        pg.on('console', lambda m: errs.append('console: ' + m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
+        await pg.goto(BASE + '#bazaar/market')
+        await pg.wait_for_timeout(3000)
+        await pg.add_script_tag(path=os.path.join(os.path.dirname(__file__), 'audit_page.js'))
+        rep = await pg.evaluate(f"siteAudit({{n: {n}, ah: ['HYPERION', 'JUJU_SHORTBOW', 'TERMINATOR', 'ASPECT_OF_THE_END', 'PET_ENDER_DRAGON']}})", )
+        rep['seitenfehler'] = errs[:20]
+        json.dump(rep, open(out, 'w'), indent=1, ensure_ascii=False)
+        print('\n'.join(rep['summary']))
+        print('Seitenfehler:', errs[:10])
+        bad = [i for i in rep['issues']]
+        print('Abweichungen:', len(bad))
+        for i in bad[:60]: print(' ', json.dumps(i, ensure_ascii=False)[:300])
+        await b.close()
+
+with serve() as BASE:
+    asyncio.run(main(sys.argv[1], int(sys.argv[2]) if len(sys.argv) > 2 else 12))

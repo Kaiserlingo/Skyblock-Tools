@@ -3,7 +3,8 @@ name: Live-Prüfung
 # Prüft die Website mit echten Daten (manuell oder per Push auf den Branch "audit-run"):
 #  1. Pipeline-Daten (market.json, bazaar_stats.json) gegen SkyCofl-Rohdaten, eigene Nachrechnung in Python
 #  2. Bazaar Flipper mit dem echten Hypixel-Stand gegen die unabhängige Nachrechnung (tests/oracle.py)
-#  3. Lowest BIN aller Items doppelt ausgerechnet (wie "Prüfung Live-Preise")
+#  3. Oberfläche: alle Bereiche gegeneinander (tests/live/audit_page.js)
+#  4. Lowest BIN aller Items doppelt ausgerechnet (wie "Prüfung Live-Preise")
 # Bericht landet auf dem Branch "audit" (audit/bericht.txt und JSON-Dateien).
 on:
   workflow_dispatch:
@@ -42,6 +43,10 @@ jobs:
       - name: Flipper mit echten Daten gegen die Nachrechnung
         continue-on-error: true
         run: LIVE_DIR=live python3 tests/test_numbers.py 2>&1 | tee audit/flipper.txt
+      - name: Oberfläche mit echten Daten (alle Bereiche gegeneinander)
+        continue-on-error: true
+        timeout-minutes: 25
+        run: python3 tests/live/audit_ui.py audit/oberflaeche.json 12 2>&1 | tee audit/oberflaeche.txt
       - name: Lowest BIN doppelt gerechnet
         continue-on-error: true
         run: |
@@ -51,7 +56,7 @@ jobs:
       - name: Bericht ablegen (Branch audit)
         if: always()
         run: |
-          cd audit && (echo "Live-Prüfung $(date -u)"; for f in daten flipper lbin; do echo; echo "=== $f ==="; tail -60 $f.txt 2>/dev/null; done) > bericht.txt
+          cd audit && (echo "Live-Prüfung $(date -u)"; for f in oberflaeche daten flipper lbin; do echo; echo "=== $f ==="; tail -60 $f.txt 2>/dev/null; done) > bericht.txt
           git init -q -b audit && git add -A
           git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "Live-Prüfung"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" audit
