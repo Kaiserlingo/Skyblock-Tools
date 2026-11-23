@@ -1,0 +1,29 @@
+name: Forschungsdaten (Prognose)
+
+# Nur manuell: exportiert komplette Preisverläufe für die Entwicklung der Preisprognose.
+on:
+  workflow_dispatch:
+    inputs:
+      ah:
+        description: "Anzahl Auction-House-Items"
+        required: false
+        default: "600"
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node tools/research_dump.mjs "${{ github.event.inputs.ah }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research
+          path: research.json.gz
+          retention-days: 7
