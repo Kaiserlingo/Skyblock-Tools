@@ -112,8 +112,8 @@ async def main():
             ok(good, f"Sortierung Markt nach {k} falsch")
         # Chart mit kaputten Daten
         out=await E("""(()=>{const el=document.createElement('div');el.style.cssText='width:600px;height:300px';document.body.appendChild(el);const c=new PriceChart(el);
-           const tests=[{t:[]},{t:[1],hi:[5],lo:[4]},{t:[1,2,3],hi:[null,null,null],lo:[null,null,null]},{t:[1,2,3],hi:[5,5,5],lo:[5,5,5]},{t:[1,2,1e12],hi:[1,NaN,3],lo:[0.5,1,2]}];
-           const r=[];for(const d of tests){try{c.setData(d);c.setIndicators({sma:20,ema:50,bb:true});c.draw();r.push('ok')}catch(e){r.push(String(e))}}c.destroy();el.remove();return r})()""")
+           const tests=[{t:[]},{t:[1],hi:[5],lo:[4]},{t:[1,2,3],hi:[null,null,null],lo:[null,null,null]},{t:[1,2,3],hi:[5,5,5],lo:[5,5,5]},{t:[1,2,1e12],hi:[1,NaN,3],lo:[0.5,1,2]},{t:[1,2],hi:[889630,889630.0000000003],lo:[null,null]},{t:[1,2],hi:[1e15,1e15+0.2],lo:[0,0]}];   // fast gleiche Werte: früher Endlosschleife im Raster
+           const r=[];for(const d of tests){try{const t0=performance.now();c.setData(d);c.view=[0,3];c.draw();if(performance.now()-t0>500)throw new Error('zu langsam');c.setIndicators({sma:20,ema:50,bb:true});c.draw();r.push('ok')}catch(e){r.push(String(e))}}c.destroy();el.remove();return r})()""")
         ok(all(x=='ok' for x in out), f"Chart mit kaputten Daten: {out}")
         ok(not errs, f"JS-Fehler: {errs}")
         await b.close()

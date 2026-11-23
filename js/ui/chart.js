@@ -176,13 +176,14 @@ class PriceChart {
     take(this.smaL); take(this.emaL); if (this.bbL){ take(this.bbL.up); take(this.bbL.lo); }
     if (this.fc){ const f = this.fc; for (let k = 0; k < f.t.length; k++){ if (f.t[k] < v0 || f.t[k] > v1) continue; for (const a of [f.q10, f.q90, f.med]){ const v = a[k]; if (v != null && isFinite(v)){ if (v < mn) mn = v; if (v > mx) mx = v; } } } }
     if (!isFinite(mn)){ mn = 0; mx = 1; }
-    if (mn === mx){ mn *= .995; mx *= 1.005; if (mn === mx){ mn -= 1; mx += 1; } }
+    // (fast) gleiche Werte: Bereich aufweiten – sonst wird der Rasterschritt kleiner als die Rechengenauigkeit
+    if (mx - mn <= Math.abs(mx) * 1e-6){ const c0 = (mn + mx) / 2; mn = c0 * .995; mx = c0 * 1.005; if (mx - mn <= 1e-9){ mn = c0 - 1; mx = c0 + 1; } }
     const pad = (mx - mn) * .08; this.yr = [mn - pad, mx + pad];
 
     // Raster + Preisachse
     c.lineWidth = 1; c.strokeStyle = col.line; c.fillStyle = col.muted; c.textAlign = 'left';
     const step = niceStep(this.yr[1] - this.yr[0], 5);
-    for (let p = Math.ceil(this.yr[0] / step) * step; p <= this.yr[1]; p += step){
+    for (let p = Math.ceil(this.yr[0] / step) * step, n = 0; p <= this.yr[1] && n < 40; p += step, n++){   // n: Schutz gegen Endlosschleife
       const y = Math.round(this.Y(p)) + .5;
       c.beginPath(); c.moveTo(g.L, y); c.lineTo(g.L + g.pw, y); c.stroke();
       c.fillText(fp(p), g.L + g.pw + 8, y);
@@ -197,7 +198,7 @@ class PriceChart {
       c.fillStyle = col.muted; c.fillText(lab, x, g.H - g.B / 2 + 2);
     };
     if (ts){
-      for (let t = Math.ceil((v0 - tzOff) / ts) * ts + tzOff; t <= v1; t += ts){
+      for (let t = Math.ceil((v0 - tzOff) / ts) * ts + tzOff, n = 0; t <= v1 && n < 40; t += ts, n++){
         const dt = new Date(t);
         tick(t, ts >= DAY ? dt.toLocaleDateString('de-AT', {day: '2-digit', month: '2-digit'})
           : (dt.getHours() === 0 && dt.getMinutes() === 0 ? dt.toLocaleDateString('de-AT', {day: '2-digit', month: '2-digit'}) : dt.toLocaleTimeString('de-AT', {hour: '2-digit', minute: '2-digit'})));

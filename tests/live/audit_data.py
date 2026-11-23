@@ -134,7 +134,7 @@ def main():
     liq = [i for i in ids if md['items'][i].get('liq')]
     rnd = random.Random(int(built) % 100000)
     sample = sorted(set(rnd.sample(liq, min(len(liq), n * 2 // 3)) + rnd.sample(ids, min(len(ids), n // 3))))
-    start_long = iso(end - (days + 3) * DAY); start7 = iso(built - 6.9 * DAY); end_s = iso(built)
+    start_long = iso(end - (520 + 2) * DAY)   # genau wie tools/build_market.mjs (LONG + 2 Tage): SkyCofl liefert je nach Zeitfenster leicht andere Tageswerte; start7 = iso(built - 6.9 * DAY); end_s = iso(built)
     def fetch(i):
         e = urllib.parse.quote(i, safe='')
         try:

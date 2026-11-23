@@ -78,11 +78,14 @@ function fcRun(I){
   const cfg = fcCfg(I), sides = fcSides(I), intra = I.k.bz ? fcIntraday(I) : {noise: 0, hi: 0};
   // Start: Bazaar = Live-Marktpreis, AH = Median der Verkäufe der letzten 24 h (mind. 3), sonst letzter Tag
   let y0 = y[end], start = 'letzter Tagespreis';
+  // AH: Ein einzelner Ausreißer-Tag am Ende (z. B. ein paar Verkäufe zu Fantasiepreisen im Tagesdurchschnitt) wäre ein falscher Start.
+  // Liegt der letzte Tag mehr als 50 % neben dem Median der 7 Tage davor, startet die Prognose bei diesem Median.
+  if (I.k.ah){ const prev = y.slice(Math.max(0, end - 7), end).filter(v => v != null); if (prev.length >= 5){ const m = E.median(prev); if (Math.abs(y[end] - m) > Math.log(1.5)){ y0 = m; start = 'Median der letzten 7 Tage (letzter Tag auffällig)'; } } }
   if (I.k.bz && sides.live > 0){ y0 = Math.log(sides.live); start = 'Live-Preis'; }
   else if (I.k.ah && I.ah && I.ah.sold && !I.id.startsWith('PET_')){
     // nur wenn die Verkäufe zum Tagesverlauf passen (Pets mischen alle Rarities, darum dort nie)
     const r = I.ah.sold.list.filter(x => x.t > now - DAY).map(x => x.p), m = r.length >= 3 ? E.median(r) : null;
-    if (m && Math.abs(Math.log(m) - y[end]) < Math.log(1.35)){ y0 = Math.log(m); start = 'Verkäufe der letzten 24 h'; }
+    if (m && Math.abs(Math.log(m) - y0) < Math.log(1.35)){ y0 = Math.log(m); start = 'Verkäufe der letzten 24 h'; }
   }
   // Lowest BIN: Verhältnis zum Startpreis, damit „jetzt“ genau der Live-Wert ist
   if (I.k.ah){ const lb = sides.liveSide.lbin, r0 = lb ? lb / Math.exp(y0) : null; sides.list = sides.list.filter(x => x[0] !== 'lbin'); if (r0 && r0 >= .4 && r0 <= 2.5) sides.list.push(['lbin', 'Lowest BIN', r0]); }
@@ -209,7 +212,7 @@ function pgFeed(keepView){
   ch.labels = {hi: side[1], lo: ''};
   ch.empty = 'Kein Verlauf';
   ch.setIndicators({hi: true, lo: false, spread: false, volume: false, sma: 0, ema: 0, bb: false});
-  ch.setData({t: h.t, hi: h.v, lo: h.v.map(() => null), vb: [], vs: []}, true);
+  ch.setData({t: h.t, hi: h.v, lo: h.v.map(() => null), vb: [], vs: []});
   const f = {t: [], med: [], q10: [], q25: [], q75: [], q90: [], show50: K.fcB50, show80: K.fcB80};
   for (let k = 0; k <= H; k++){ const d = fcDay(F, side, k); f.t.push(d.t); for (const x of ['med', 'q10', 'q25', 'q75', 'q90']) f[x].push(d[x]); }
   ch.onHoverFc = k => p.legend(pgLegend(F, side, k == null ? H : k, k == null));
