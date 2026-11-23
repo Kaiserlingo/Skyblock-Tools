@@ -180,7 +180,7 @@ class PriceChart {
       c.fillText(fp(p), g.L + g.pw + 8, y);
     }
     // Zeitachse
-    const span = v1 - v0, ts = TIME_STEPS.find(s => span / s <= 7);
+    const span = v1 - v0, maxT = Math.max(2, Math.min(7, Math.floor(g.pw / 75))), ts = TIME_STEPS.find(s => span / s <= maxT);   // so viele Beschriftungen, wie Platz haben
     const tzOff = new Date().getTimezoneOffset() * 60e3;
     c.textAlign = 'center';
     const tick = (t, lab) => {
@@ -195,7 +195,7 @@ class PriceChart {
           : (dt.getHours() === 0 && dt.getMinutes() === 0 ? dt.toLocaleDateString('de-AT', {day: '2-digit', month: '2-digit'}) : dt.toLocaleTimeString('de-AT', {hour: '2-digit', minute: '2-digit'})));
       }
     } else {   // lange Zeiträume: Monatsanfänge
-      const ms = MONTH_STEPS.find(m => span / (m * 30.44 * DAY) <= 7) || 48;
+      const ms = MONTH_STEPS.find(m => span / (m * 30.44 * DAY) <= maxT) || 48;
       const d0 = new Date(v0); let y = d0.getFullYear(), m = Math.ceil((d0.getMonth() + (d0.getDate() > 1 ? 1 : 0)) / ms) * ms;
       for (let k = 0; k < 200; k++, m += ms){
         const t = new Date(y, m, 1).getTime(); if (t > v1) break; if (t < v0) continue;
