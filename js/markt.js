@@ -999,7 +999,7 @@ function fcRun(I){
 }
 function fcGet(I){
   const f = I.fc, live = fcSides(I).live;
-  if (!f || f.A !== I.A || Date.now() - f.at > 10 * 60e3 || (live && f.liveAt && Math.abs(live / f.liveAt - 1) > .005)){ I.fc = fcRun(I); if (I.fc) I.fc.A = I.A; }
+  if (!f || f.A !== I.A || Date.now() - f.at > 10 * 60e3 || (live && (!f.liveAt || Math.abs(live / f.liveAt - 1) > .005))){ I.fc = fcRun(I); if (I.fc) I.fc.A = I.A; }
   return I.fc;
 }
 // Standard: Bazaar Instabuy (Kaufpreis), Auction House Lowest BIN (was man wirklich zahlt)
