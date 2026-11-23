@@ -27,7 +27,8 @@ window.siteAudit = async function(opt = {}){
       chk('Text ohne kaputte Werte', i < 0, `${where}: „${w}“`, i >= 0 ? t.slice(Math.max(0, i - 70), i + 40) : null);
     }
   };
-  const dl = root => { const m = {}; (root ? root.querySelectorAll('dt') : []).forEach(dt => { const dd = dt.nextElementSibling; if (dd) m[dt.textContent.trim()] = dd.textContent.replace(/\s+/g, ' ').trim(); }); return m; };
+  const N = s => s == null ? s : String(s).replace(/\s+/g, ' ').trim();   // Leerzeichen vereinheitlichen (price() trennt Tausender mit festem Leerzeichen)
+  const dl = root => { const m = {}; (root ? root.querySelectorAll('dt') : []).forEach(dt => { const dd = dt.nextElementSibling; if (dd) m[dt.textContent.trim()] = N(dd.textContent); }); return m; };
 
   /* ---------- 1. Bazaar: Rohdaten und Rechnung je Zeile ---------- */
   await go('#bazaar/market', () => S.rows.length > 100, 30000);
@@ -80,9 +81,9 @@ window.siteAudit = async function(opt = {}){
     await until(() => !(K.it.fcBT === null), 20000);
     const I = K.it, A = I.A, o = md.items[id], r = S.byId[id], head = dl(document.querySelector('#mi-head .mk-fig')), gl = dl(document.querySelector('.mk-glance'));
     if (I.k.bz && r){
-      chk('Kopf Instabuy = Flipper', head['Instabuy'] === price(r.topSell), id, [head['Instabuy'], price(r.topSell)]);
-      chk('Kopf Instasell = Flipper', head['Instasell'] === price(r.topBuy), id, [head['Instasell'], price(r.topBuy)]);
-      chk('Kopf Spread = Flipper', head['Spread'] === pct(r.spreadPct, false), id, [head['Spread'], pct(r.spreadPct, false)]);
+      chk('Kopf Instabuy = Flipper', head['Instabuy'] === N(price(r.topSell)), id, [head['Instabuy'], price(r.topSell)]);
+      chk('Kopf Instasell = Flipper', head['Instasell'] === N(price(r.topBuy)), id, [head['Instasell'], price(r.topBuy)]);
+      chk('Kopf Spread = Flipper', head['Spread'] === N(pct(r.spreadPct, false)), id, [head['Spread'], pct(r.spreadPct, false)]);
       // Kennzahlen der Item-Seite (eigene Abfrage bei SkyCofl) gegen die Tagesdaten der Pipeline
       if (o) for (const [k, lab] of [['c7', '7 Tage'], ['c30', '30 Tage'], ['c365', '1 Jahr']])
         chk('Item-Seite = Liste (Veränderung)', o[k] == null || A[k] == null || Math.abs(A[k] - o[k]) < .0006, `${id} ${lab}`, [gl[lab], P(o[k])]);
@@ -91,7 +92,7 @@ window.siteAudit = async function(opt = {}){
     }
     if (I.k.ah){
       const x = K.px.items[id];
-      if (x) chk('Kopf Lowest BIN = prices.json', head['Lowest BIN'] === (x.b != null ? price(x.b) : '–'), id, [head['Lowest BIN'], x.b]);
+      if (x) chk('Kopf Lowest BIN = prices.json', head['Lowest BIN'] === N(x.b != null ? price(x.b) : '–'), id, [head['Lowest BIN'], x.b]);
       try{
         const lb = await (await fetch(CFG.cofl + `auctions/tag/${encodeURIComponent(id)}/active/bin`)).json();
         if (Array.isArray(lb) && lb.length && x && x.b != null){
@@ -111,7 +112,7 @@ window.siteAudit = async function(opt = {}){
         let ord = true; for (let k = 1; k < f.t.length; k++) if (!(f.q10[k] <= f.q25[k] && f.q25[k] <= f.med[k] && f.med[k] <= f.q75[k] && f.q75[k] <= f.q90[k])) ord = false;
         chk('Prognose: Bereiche geordnet', ord, tag);
         const tiles = [...document.querySelectorAll('.pg-tile dd b')].map(b => b.textContent);
-        [1, 7, 31].forEach((h, i) => chk('Prognose: Kachel = Tagesrechnung', tiles[i] === price(fcDay(F, side, h).med), `${tag} ${h}`, [tiles[i], price(fcDay(F, side, h).med)]));
+        [1, 7, 31].forEach((h, i) => chk('Prognose: Kachel = Tagesrechnung', N(tiles[i]) === N(price(fcDay(F, side, h).med)), `${tag} ${h}`, [tiles[i], price(fcDay(F, side, h).med)]));
         const rows = [...document.querySelectorAll('.pg-tbl tbody tr')];
         chk('Prognose: Tabelle = Kacheln', rows[6] && rows[30] && rows[6].children[1].textContent === tiles[1] && rows[30].children[1].textContent === tiles[2], tag);
         const ch = fcDay(F, side, 31).ch, v = document.querySelector('.pg-verdict').innerText;
@@ -121,7 +122,7 @@ window.siteAudit = async function(opt = {}){
         const lg = document.querySelector('#pg-legend').innerText;
         chk('Prognose: Legende = Kachel', lg.includes(price(fcDay(F, side, K.fcView).med)), tag);
         // „Jetzt“ der Prognose gegen den Kopf der Seite
-        const nowTxt = (document.querySelector('.pg-now b') || {}).textContent;
+        const nowTxt = N((document.querySelector('.pg-now b') || {}).textContent);
         if (I.k.bz && r && side[0] === 'buy') chk('Prognose „Jetzt“ Instabuy = Kopf', nowTxt === head['Instabuy'], id, [nowTxt, head['Instabuy']]);
         if (I.k.bz && r && side[0] === 'sell') chk('Prognose „Jetzt“ Instasell = Kopf', nowTxt === head['Instasell'], id, [nowTxt, head['Instasell']]);
         if (I.k.ah && side[0] === 'lbin') chk('Prognose „Jetzt“ Lowest BIN = Kopf', nowTxt === head['Lowest BIN'], id, [nowTxt, head['Lowest BIN']]);
@@ -146,21 +147,23 @@ window.siteAudit = async function(opt = {}){
 
   /* ---------- 4. Flip-Tabelle gegen Detailfenster ---------- */
   await go('#bazaar/flips', () => document.querySelector('#view table'));
-  for (const tr of [...document.querySelectorAll('#view tbody tr[data-open]')].slice(0, 6)){
-    const id = tr.dataset.open, r = S.byId[id], cell = tr.children[7].childNodes[0].textContent.trim();
-    tr.click(); await wait(500);
+  const fids = [...document.querySelectorAll('#view tbody tr[data-open]')].slice(0, 6).map(tr => tr.dataset.open);
+  for (const id of fids){
+    const tr = document.querySelector(`#view tbody tr[data-open="${CSS.escape(id)}"]`); if (!tr) continue;   // Tabelle wird alle 20 s neu gezeichnet
+    const r = S.byId[id], cell = N(tr.children[7].childNodes[0].textContent);
+    tr.click(); await until(() => S.detail === id && document.querySelector('#modal.on'), 3000);
     const m = dl(document.querySelector('#modal .figures'));
-    chk('Flip-Tabelle = Detailfenster (Profit pro Stunde)', (m['Profit pro Stunde'] || '').startsWith(fmt(r.pphTyp)), id, [cell, m['Profit pro Stunde']]);
-    chk('Flip-Tabelle = Detailfenster (Gewinn pro Stück)', (m['Flip-Gewinn pro Stück'] || '') === price(r.profit), id);
-    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})); await wait(200);
+    chk('Flip-Tabelle = Detailfenster (Profit pro Stunde)', (m['Profit pro Stunde'] || '').startsWith(cell), id, [cell, m['Profit pro Stunde']]);
+    chk('Flip-Tabelle = Detailfenster (Gewinn pro Stück)', m['Flip-Gewinn pro Stück'] === N(price(r.profit)), id, [m['Flip-Gewinn pro Stück'], price(r.profit)]);
+    document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})); await until(() => !document.querySelector('#modal.on'), 2000);
   }
 
   /* ---------- 5. Startseite gegen die Bereiche ---------- */
   await go('#', () => document.querySelector('#home-kpis .mk-now'), 20000); await wait(1500);
   const kp = [...document.querySelectorAll('#home-kpis .mk-now')].map(a => a.querySelector('.v').textContent.trim());
-  chk('Start: Passende Flips = Flipper', kp[0] === NF0.format(filteredFlips(true).length + filteredCrafts(true).length), 'Passende Flips', [kp[0]]);
-  chk('Start: Preisindex 7 Tage = Markt-Analyse', kp[1] === P(Econ.change(md.index.spi, 7)), 'Index', [kp[1]]);
-  for (const li of document.querySelectorAll('#home-flips li[data-open]')){ const r = S.byId[li.dataset.open]; chk('Start: Beste Flips = Flip-Tabelle', li.querySelector('.v').childNodes[0].textContent.trim() === fmt(r.pphTyp), r.id); }
+  chk('Start: Passende Flips = Flipper', kp[0] === N(NF0.format(filteredFlips(true).length + filteredCrafts(true).length)), 'Passende Flips', [kp[0]]);
+  chk('Start: Preisindex 7 Tage = Markt-Analyse', kp[1] === N(P(Econ.change(md.index.spi, 7))), 'Index', [kp[1]]);
+  for (const li of document.querySelectorAll('#home-flips li[data-open]')){ const r = S.byId[li.dataset.open]; chk('Start: Beste Flips = Flip-Tabelle', N(li.querySelector('.v').childNodes[0].textContent) === N(fmt(r.pphTyp)), r.id); }
   scan('#start');
 
   /* ---------- 6. alle Seiten ---------- */
