@@ -160,7 +160,7 @@ window.siteAudit = async function(opt = {}){
 
   /* ---------- 5. Startseite gegen die Bereiche ---------- */
   await go('#', () => document.querySelector('#home-kpis .mk-now'), 20000); await wait(1500);
-  const kp = [...document.querySelectorAll('#home-kpis .mk-now')].map(a => a.querySelector('.v').textContent.trim());
+  const kp = [...document.querySelectorAll('#home-kpis .mk-now')].map(a => N(a.querySelector('.v').textContent));
   chk('Start: Passende Flips = Flipper', kp[0] === N(NF0.format(filteredFlips(true).length + filteredCrafts(true).length)), 'Passende Flips', [kp[0]]);
   chk('Start: Preisindex 7 Tage = Markt-Analyse', kp[1] === N(P(Econ.change(md.index.spi, 7))), 'Index', [kp[1]]);
   for (const li of document.querySelectorAll('#home-flips li[data-open]')){ const r = S.byId[li.dataset.open]; chk('Start: Beste Flips = Flip-Tabelle', N(li.querySelector('.v').childNodes[0].textContent) === N(fmt(r.pphTyp)), r.id); }
