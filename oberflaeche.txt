@@ -1,0 +1,51 @@
+Seitlicher Überstand: keiner
+ok  Bazaar: Instasell = höchste Buy-Order: 2207/2207
+ok  Bazaar: Instabuy = niedrigste Sell-Offer: 2207/2207
+ok  Bazaar: Gewinn pro Stück: 1752/1752
+ok  Bazaar: Spread (auf Buy-Order bezogen): 1752/1752
+ok  Bazaar: Wochenmengen: 2207/2207
+ok  Bazaar: Sortierung Orderbuch: 2207/2207
+ok  Liste: Kaufen = Instabuy im Flipper: 1859/1859
+ok  Liste: Sofort verkaufen = Instasell im Flipper: 1859/1859
+ok  Liste: Veränderungen = Tagesdaten: 5598/5598
+ok  Liste: Bazaar/AH eindeutig: 8366/8366
+ok  Liste: AH-Preis = Lowest BIN (prices.json): 2374/2374
+ok  Ranglisten = Tagesdaten: 32/32
+ok  Text ohne kaputte Werte: 1050/1050
+ok  Grafiken ohne kaputte Werte (SVG-Attribute): 175/175
+ok  Item-Seite lädt: 17/17
+ok  Kopf Instabuy = Flipper: 12/12
+ok  Kopf Instasell = Flipper: 12/12
+ok  Kopf Spread = Flipper: 12/12
+ok  Item-Seite = Liste (Veränderung): 36/36
+ok  Item-Seite = Ranglisten (Schwankung): 12/12
+ok  Item-Seite = Pipeline (Tagesmittel): 12/12
+ok  Prognose: Verlauf endet am Startpreis: 45/45
+ok  Prognose: Bereiche geordnet: 45/45
+ok  Prognose: Kachel = Tagesrechnung: 135/135
+ok  Prognose: Tabelle = Kacheln: 45/45
+ok  Prognose: Fazit = Kachel 31 Tage: 45/45
+ok  Prognose: Summe der Einflüsse = Kachel: 45/45
+ok  Prognose: Legende = Kachel: 45/45
+ok  Prognose „Jetzt“ Instabuy = Kopf: 12/12
+ok  Prognose „Jetzt“ Instasell = Kopf: 12/12
+ok  Angebot & Nachfrage: Spread = Kopf: 12/12
+FEHLER Angebot & Nachfrage: Bereich = Instasell bis Instabuy: 11/12
+FEHLER Flipper-Analyse Instabuy = Markt-Analyse: 11/12
+ok  Flipper-Analyse Instasell = Markt-Analyse: 12/12
+ok  Flipper-Analyse Spread = Markt-Analyse: 12/12
+ok  Kopf Lowest BIN = prices.json: 5/5
+ok  Lowest BIN ≈ SkyCofl live (±10 %, bis 5 min Versatz): 5/5
+ok  Prognose „Jetzt“ Lowest BIN = Kopf: 4/4
+ok  Flip-Tabelle = Detailfenster (Profit pro Stunde): 6/6
+ok  Flip-Tabelle = Detailfenster (Gewinn pro Stück): 6/6
+ok  Craft-Tabelle = Rechnung: 1/1
+ok  Craft-Tabelle = Detailfenster: 1/1
+ok  Start: Passende Flips = Flipper: 1/1
+ok  Start: Preisindex 7 Tage = Markt-Analyse: 1/1
+ok  Start: Beste Flips = Flip-Tabelle: 6/6
+ok  keine Skriptfehler: 1/1
+Seitenfehler: []
+Abweichungen: 2
+  {"area": "Angebot & Nachfrage: Bereich = Instasell bis Instabuy", "msg": "ENCHANTED_GUNPOWDER", "data": ["3 467,2 bis 4 199,4"]}
+  {"area": "Flipper-Analyse Instabuy = Markt-Analyse", "msg": "ENCHANTED_GUNPOWDER", "data": ["4 199,4", "4 199,5"]}

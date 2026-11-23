@@ -1,0 +1,108 @@
+Live-Prüfung Mon Nov 23 13:39:14 UTC 2026
+
+=== oberflaeche ===
+Seitlicher Überstand: keiner
+ok  Bazaar: Instasell = höchste Buy-Order: 2207/2207
+ok  Bazaar: Instabuy = niedrigste Sell-Offer: 2207/2207
+ok  Bazaar: Gewinn pro Stück: 1752/1752
+ok  Bazaar: Spread (auf Buy-Order bezogen): 1752/1752
+ok  Bazaar: Wochenmengen: 2207/2207
+ok  Bazaar: Sortierung Orderbuch: 2207/2207
+ok  Liste: Kaufen = Instabuy im Flipper: 1859/1859
+ok  Liste: Sofort verkaufen = Instasell im Flipper: 1859/1859
+ok  Liste: Veränderungen = Tagesdaten: 5598/5598
+ok  Liste: Bazaar/AH eindeutig: 8366/8366
+ok  Liste: AH-Preis = Lowest BIN (prices.json): 2374/2374
+ok  Ranglisten = Tagesdaten: 32/32
+ok  Text ohne kaputte Werte: 1050/1050
+ok  Grafiken ohne kaputte Werte (SVG-Attribute): 175/175
+ok  Item-Seite lädt: 17/17
+ok  Kopf Instabuy = Flipper: 12/12
+ok  Kopf Instasell = Flipper: 12/12
+ok  Kopf Spread = Flipper: 12/12
+ok  Item-Seite = Liste (Veränderung): 36/36
+ok  Item-Seite = Ranglisten (Schwankung): 12/12
+ok  Item-Seite = Pipeline (Tagesmittel): 12/12
+ok  Prognose: Verlauf endet am Startpreis: 45/45
+ok  Prognose: Bereiche geordnet: 45/45
+ok  Prognose: Kachel = Tagesrechnung: 135/135
+ok  Prognose: Tabelle = Kacheln: 45/45
+ok  Prognose: Fazit = Kachel 31 Tage: 45/45
+ok  Prognose: Summe der Einflüsse = Kachel: 45/45
+ok  Prognose: Legende = Kachel: 45/45
+ok  Prognose „Jetzt“ Instabuy = Kopf: 12/12
+ok  Prognose „Jetzt“ Instasell = Kopf: 12/12
+ok  Angebot & Nachfrage: Spread = Kopf: 12/12
+FEHLER Angebot & Nachfrage: Bereich = Instasell bis Instabuy: 11/12
+FEHLER Flipper-Analyse Instabuy = Markt-Analyse: 11/12
+ok  Flipper-Analyse Instasell = Markt-Analyse: 12/12
+ok  Flipper-Analyse Spread = Markt-Analyse: 12/12
+ok  Kopf Lowest BIN = prices.json: 5/5
+ok  Lowest BIN ≈ SkyCofl live (±10 %, bis 5 min Versatz): 5/5
+ok  Prognose „Jetzt“ Lowest BIN = Kopf: 4/4
+ok  Flip-Tabelle = Detailfenster (Profit pro Stunde): 6/6
+ok  Flip-Tabelle = Detailfenster (Gewinn pro Stück): 6/6
+ok  Craft-Tabelle = Rechnung: 1/1
+ok  Craft-Tabelle = Detailfenster: 1/1
+ok  Start: Passende Flips = Flipper: 1/1
+ok  Start: Preisindex 7 Tage = Markt-Analyse: 1/1
+ok  Start: Beste Flips = Flip-Tabelle: 6/6
+ok  keine Skriptfehler: 1/1
+Seitenfehler: []
+Abweichungen: 2
+  {"area": "Angebot & Nachfrage: Bereich = Instasell bis Instabuy", "msg": "ENCHANTED_GUNPOWDER", "data": ["3 467,2 bis 4 199,4"]}
+  {"area": "Flipper-Analyse Instabuy = Markt-Analyse", "msg": "ENCHANTED_GUNPOWDER", "data": ["4 199,4", "4 199,5"]}
+
+=== daten ===
+{
+ "p": "158/158",
+ "p24": "30/158",
+ "c1": "158/158",
+ "c7": "154/158",
+ "c30": "154/158",
+ "c90": "155/158",
+ "c365": "155/158",
+ "v30": "154/158",
+ "dd": "154/158",
+ "w": "154/158",
+ "my": "154/158",
+ "stats": "0/158"
+}
+Abweichungen: 316
+  {'id': 'ARACHNE_FRAGMENT', 'f': 'p24', 'pub': 13154, 'neu': 13082.428964858207}
+  {'id': 'ARACHNE_FRAGMENT', 'f': 'stats', 'keys': ['am', 'ra', 'tr', 'vt', 'n'], 'sq': [2, 4, 7, 8, 9], 'pub': {'am': 18081, 'ra': 0.037012, 'tr': -0.28571, 'vt': 0.26963, 'n': 81}, 'neu': {'am': 18040.5, 'ra': 0.039314889706077126, 'tr': -0.2993760472385959, 'vt': 0.27928225088234315, 'n': 82}}
+  {'id': 'ASHWREATH', 'f': 'p24', 'pub': 944.87, 'neu': 942.8229284510109}
+  {'id': 'ASHWREATH', 'f': 'stats', 'keys': ['ra', 'tr', 'vt', 'n'], 'sq': [1, 4, 6, 7, 8], 'pub': {'ra': 0.00097769, 'tr': 0.56214, 'vt': 0.033043, 'n': 81}, 'neu': {'ra': 0.0009411108746586456, 'tr': 0.5654226920290828, 'vt': 0.025181995864374196, 'n': 82}}
+  {'id': 'BUSTED_BELT_BUCKLE', 'f': 'p24', 'pub': 30743, 'neu': 30729.271107900142}
+  {'id': 'BUSTED_BELT_BUCKLE', 'f': 'stats', 'keys': ['ra', 'rb', 'vt', 'n'], 'sq': [2, 5, 6, 10, 11], 'pub': {'ra': 0.018054, 'rb': 0.013853, 'vt': 0.62194, 'n': 81}, 'neu': {'ra': 0.018463579514393574, 'rb': 0.012898509482302239, 'vt': 0.6215672569120845, 'n': 82}}
+  {'id': 'CANDY_CORN', 'f': 'p24', 'pub': 1472.3, 'neu': 1416.6416801262285}
+  {'id': 'CANDY_CORN', 'f': 'stats', 'keys': ['tr', 'vt', 'n'], 'sq': [1, 2, 6, 7, 8], 'pub': {'tr': 6.0366, 'vt': 2.238, 'n': 67}, 'neu': {'tr': 5.984807366687542, 'vt': 2.236826524570752, 'n': 68}}
+  {'id': 'CHILI_PEPPER', 'f': 'p24', 'pub': 154790, 'neu': 154669.96609919443}
+  {'id': 'CHILI_PEPPER', 'f': 'stats', 'keys': ['ra', 'tr', 'vt', 'n'], 'sq': [1, 7, 8, 9, 10], 'pub': {'ra': 0.0095836, 'tr': 0.4141, 'vt': 1.1753, 'n': 81}, 'neu': {'ra': 0.00911333700085695, 'tr': 0.4129113157120081, 'vt': 1.1741121322238048, 'n': 82}}
+  {'id': 'CHOCOBERRY', 'f': 'p24', 'pub': 102060, 'neu': 102196.01593692522}
+  {'id': 'CHOCOBERRY', 'f': 'stats', 'keys': ['ra', 'tr', 'vt', 'n'], 'sq': [3, 5, 8, 14, 15], 'pub': {'ra': 1.6121e-05, 'tr': -0.050502, 'vt': -0.023875, 'n': 80}, 'neu': {'ra': 1.1036869382195897e-05, 'tr': -0.04894502825732028, 'vt': -0.03299838092056229, 'n': 82}}
+  {'id': 'COLOSSAL_EXP_BOTTLE', 'f': 'p24', 'pub': 2236500, 'neu': 2222616.463903322}
+  {'id': 'COLOSSAL_EXP_BOTTLE', 'f': 'stats', 'keys': ['tr', 'vt', 'n'], 'sq': [1, 3, 9, 10, 12], 'pub': {'tr': 0.06294, 'vt': 0.43524, 'n': 81}, 'neu': {'tr': 0.047851494940152506, 'vt': 0.4846771251368114, 'n': 82}}
+  {'id': 'COMPACTED_MOONFLOWER', 'f': 'p24', 'pub': 50455, 'neu': 50477.36909702889}
+  {'id': 'COMPACTED_MOONFLOWER', 'f': 'stats', 'keys': ['am', 'ra', 'rb', 'tr', 'vt', 'n'], 'sq': [1, 3, 4, 5, 6], 'pub': {'am': 56996, 'ra': 0.0065586, 'rb': 0.0017171, 'tr': -0.48907, 'vt': -0.1089, 'n': 80}, 'neu': {'am': 56893.899999999994, 'ra': 0.0063191031173668, 'rb': 0.0013647589291069621, 'tr': -0.48962965515014545, 'vt': -0.11188084076048721, 'n': 82}}
+  {'id': 'COMPACT_OOZE', 'f': 'stats', 'keys': ['vt', 'n'], 'sq': [], 'pub': {'vt': 0.50352, 'n': 81}, 'neu': {'vt': 0.5060533967750462, 'n': 82}}
+  {'id': 'COMPOST', 'f': 'stats', 'keys': ['ra', 'rb', 'tr', 'vt', 'n'], 'sq': [1, 2, 3, 4, 5], 'pub': {'ra': 0.010022, 'rb': 0.0022041, 'tr': -0.1365, 'vt': -0.25879, 'n': 81}, 'neu': {'ra': 0.010253529299019026, 'rb': 0.0021653645607774526, 'tr': -0.1368024241593857, 'vt': -0.2512520893189091, 'n': 82}}
+  {'id': 'CORRUPTED_NETHER_STAR', 'f': 'p24', 'pub': 10392, 'neu': 10408.301806914955}
+  {'id': 'CORRUPTED_NETHER_STAR', 'f': 'stats', 'keys': ['tr', 'vt', 'n'], 'sq': [7, 8, 11, 12, 18], 'pub': {'tr': -0.03414, 'vt': 0.64662, 'n': 81}, 'neu': {'tr': -0.03163962663776232, 'vt': 0.6491658478345854, 'n': 82}}
+  {'id': 'CRYSTAL_FRAGMENT', 'f': 'stats', 'keys': ['am', 'ra', 'tr', 'vt', 'n'], 'sq': [1, 2, 3, 5, 6], 'pub': {'am': 188820, 'ra': 0.0082829, 'tr': -0.0077933, 'vt': 0.11412, 'n': 81}, 'neu': {'am': 188875.84999999998, 'ra': 0.008414125491323272, 'tr': -0.007072292695905369, 'vt': 0.11442478492563835, 'n': 82}}
+  {'id': 'DAEDALUS_STICK', 'f': 'p24', 'pub': 742490, 'neu': 742882.0934498418}
+  {'id': 'DAEDALUS_STICK', 'f': 'stats', 'keys': ['am', 'tr', 'vt', 'n'], 'sq': [1, 7, 10, 11, 12], 'pub': {'am': 992500, 'tr': 0.29863, 'vt': -0.10132, 'n': 80}, 'neu': {'am': 934999.5, 'tr': 0.30720308165340615, 'vt': -0.09251101321585908, 'n': 81}}
+  {'id': 'DERELICT_ASHE', 'f': 'p24', 'pub': 1284.3, 'neu': 1284.8532364736989}
+  {'id': 'DERELICT_ASHE', 'f': 'stats', 'keys': ['bm', 'ra', 'rb', 'tr', 'vt', 'n'], 'sq': [1, 2, 3, 4, 5], 'pub': {'bm': 1274.6, 'ra': 0.0029659, 'rb': 0.004045, 'tr': -0.11463, 'vt': 1.4794, 'n': 81}, 'neu': {'bm': 1276.4499999999998, 'ra': 0.0030173970695883475, 'rb': 0.003655725979496254, 'tr': -0.11395379822370633, 'vt': 1.4946307376053403, 'n': 82}}
+  {'id': 'DIVINE_GIFT', 'f': 'p24', 'pub': 21266000, 'neu': 21238188.893508177}
+  {'id': 'DIVINE_GIFT', 'f': 'stats', 'keys': ['am', 'rb', 'tr', 'vt', 'n'], 'sq': [1, 2, 3, 4, 5], 'pub': {'am': 22400000, 'rb': 0.0064438, 'tr': -0.14784, 'vt': 8.1287, 'n': 66}, 'neu': {'am': 22325701.200000003, 'rb': 0.006325761998277241, 'tr': -0.15193679732530097, 'vt': 8.185267857142858, 'n': 68}}
+  {'id': 'DO_NOT_EAT_SHROOM', 'f': 'stats', 'keys': ['vt', 'n'], 'sq': [1, 4], 'pub': {'vt': -0.18467, 'n': 81}, 'neu': {'vt': -0.18423826066591198, 'n': 82}}
+  {'id': 'DRAGON_HORN', 'f': 'p24', 'pub': 1669100, 'neu': 1660227.7183153378}
+  {'id': 'DRAGON_HORN', 'f': 'stats', 'keys': ['am', 'ra', 'tr', 'vt', 'n'], 'sq': [10, 11, 12, 17, 19], 'pub': {'am': 2782100, 'ra': 0.011823, 'tr': -0.49868, 'vt': 0.31342, 'n': 81}, 'neu': {'am': 2718125.3499999996, 'ra': 0.012394967053757299, 'tr': -0.505622248337321, 'vt': 0.31885182311869675, 'n': 82}}
+
+=== flipper ===
+live (2207 Items): 9 Einstellungs-Kombinationen, 900 Rechner-Fälle, Seitenfehler=[]
+FEHLER: 0
+
+=== lbin ===
+Items mit BIN: 2380, abweichend: 0
