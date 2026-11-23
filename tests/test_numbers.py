@@ -44,10 +44,10 @@ DUMP="""(()=>{const o={};for(const r of S.rows){o[r.id]={topBuy:r.topBuy,topSell
  return {rows:o,crafts:c,flips:filteredFlips(true).map(r=>r.id).sort(),cf:filteredCrafts(true).map(c=>c.ri).sort((a,b)=>a-b)}})()"""
 async def run(name, snap, items, stats):
     async with async_playwright() as p:
-        b=await p.chromium.launch(executable_path="/usr/bin/google-chrome",args=["--no-proxy-server"])
+        b=await launch(p)
         pg=await b.new_page(); errs=[]; pg.on("pageerror",lambda e:errs.append(str(e)))
         await setup(pg, snap, items, stats)
-        await pg.goto("http://localhost:8765/#bazaar/flips"); await pg.wait_for_timeout(1500)
+        await pg.goto(BASE+"#bazaar/flips"); await pg.wait_for_timeout(1500)
         await pg.evaluate("S.paused=true; clearTimeout(S.timer)")
         npc={i['id']:i['npc_sell_price'] for i in items['items'] if i.get('npc_sell_price')}
         combos=0
@@ -105,4 +105,7 @@ async def main():
         combos,n,errs,xss=await run(name,snap,items,stats)
         print(f"{name}: {combos} Einstellungs-Kombinationen, {n} Rechner-Fälle, Seitenfehler={errs}, XSS ausgeführt={bool(xss)}")
     print("FEHLER:",len(fails)); [print(" ",f) for f in fails[:40]]
-asyncio.run(main())
+from web import serve, launch
+with serve() as BASE:
+    asyncio.run(main())
+sys.exit(1 if fails else 0)

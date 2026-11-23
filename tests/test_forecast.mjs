@@ -1,7 +1,7 @@
-// Tests für js/forecast.js:  node tests/test_forecast.mjs
+// Tests für js/lib/forecast.js:  node tests/test_forecast.mjs
 import {createRequire} from 'node:module';
 const require = createRequire(import.meta.url);
-const F = require('../js/forecast.js');
+const F = require('../js/lib/forecast.js');
 let ok = 0, bad = 0;
 const check = (name, cond, info = '') => { if (cond) ok++; else { bad++; console.log('FEHLER', name, info); } };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;

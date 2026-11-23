@@ -1,7 +1,7 @@
 """Prüft js/econ.js gegen eine unabhängige Nachrechnung mit numpy (Zufallsdaten + Randfälle)."""
 import json, subprocess, os, math, random, datetime as dt
 import numpy as np
-HERE = os.path.dirname(os.path.abspath(__file__)); ECON = os.path.join(HERE, '..', 'js', 'econ.js')
+HERE = os.path.dirname(os.path.abspath(__file__)); ECON = os.path.join(HERE, '..', 'js', 'lib', 'econ.js')
 DAY = 86400000
 fails = []; checks = 0
 def node(code):

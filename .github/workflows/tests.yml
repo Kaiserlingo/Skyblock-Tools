@@ -1,0 +1,36 @@
+name: Tests
+
+# Prüft jeden Push und Pull Request mit tools/check.sh (Code, Rechenkerne, Pipeline-Trockenlauf,
+# Rauchtest aller Seiten, Bedienung). Schlägt ein Test fehl, zeigt GitHub das am Commit an.
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: |
+          pip install numpy playwright
+          python -m playwright install --with-deps chromium
+      - name: Prüfen
+        run: tools/check.sh

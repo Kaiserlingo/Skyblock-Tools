@@ -1,5 +1,5 @@
 """Unabhängige Nachrechnung aller Kennzahlen des Bazaar Flippers.
-Bewusst NICHT aus app.js abgeleitet, sondern aus den Regeln:
+Bewusst NICHT aus dem Website-Code (js/bazaar/) abgeleitet, sondern aus den Regeln:
   - Buy-Order = höchste Buy-Order + 0,1 ; Sell-Offer = niedrigste Sell-Offer − 0,1
   - Steuer nur auf Verkäufe ; Buy-Orders füllen sich durch Instasells, Sell-Offers durch Instabuys
   - max. 71.680 Stück pro Order

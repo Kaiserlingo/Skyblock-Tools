@@ -3,29 +3,11 @@
 // Tagesverläufe der meistgehandelten Auction-House-Items. Ergebnis: research.json.gz
 import {writeFileSync} from 'node:fs';
 import {gzipSync} from 'node:zlib';
+import {get as getJSON, pool as runPool} from './lib/http.mjs';
 const C = 'https://sky.coflnet.com/api/', UA = {'User-Agent': 'SkyBlockTools-Forschung (github.com/Kaiserlingo/Skyblock-Tools)'};
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 const AH_N = +(process.argv[2] || 600);
-async function get(url, tries = 6){
-  for (let k = 0; k < tries; k++){
-    try{
-      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 40e3);
-      const r = await fetch(url, {headers: UA, signal: ctl.signal}); clearTimeout(to);
-      if (r.status === 204) return [];
-      if (r.status === 429){ await sleep(15e3 * (k + 1)); continue; }
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return await r.json();
-    }catch(e){ if (k === tries - 1) throw new Error(url + ': ' + e.message); await sleep(2000 * 2 ** k); }
-  }
-}
-async function pool(items, n, fn){
-  const out = new Array(items.length); let i = 0, done = 0;
-  await Promise.all(Array.from({length: n}, async () => {
-    while (i < items.length){ const k = i++; try{ out[k] = await fn(items[k]); }catch(e){ out[k] = null; console.warn(e.message); }
-      if (++done % 100 === 0) console.log(`  ${done}/${items.length}`); await sleep(100); }
-  }));
-  return out;
-}
+const get = url => getJSON(url, {tries: 6, timeout: 40e3, ua: UA});
+const pool = (items, n, fn) => runPool(items, n, fn, {gap: 100, every: 100});
 const pu = s => Date.parse(/Z|[+-]\d\d:?\d\d$/.test(s) ? s : s + 'Z');
 async function bzAll(id){
   const seen = new Set(), out = []; let end = new Date().toISOString();

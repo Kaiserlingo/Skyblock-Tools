@@ -1,7 +1,7 @@
 'use strict';
 /* =========================================================
    Startseite – verbindet Bazaar Flipper und Markt-Analyse auf oberster Ebene.
-   Liest nur fertige Daten beider Bereiche (S aus app.js, Markt.data() aus markt.js)
+   Liest nur fertige Daten beider Bereiche (S aus bazaar/, Markt.data() aus markt/)
    und zeigt, wo sich gerade etwas tut: beste Flips, frühe Signale, Marktlage.
    ========================================================= */
 (function(){

@@ -1,15 +1,19 @@
 # Tests
 
-Prüfen, dass jede Zahl der Website stimmt.
+Alle Prüfungen mit einem Befehl: `tools/check.sh` (siehe dort für `--fast` und `--full`).
+Browser-Tests starten ihren Webserver selbst (`tests/web.py`) und nutzen Chrome, falls installiert, sonst Playwrights Chromium.
 
-- `oracle.py` – unabhängige Nachrechnung aller Kennzahlen (Flips, Crafts, NPC, Flip-Rechner)
-- `test_numbers.py` – vergleicht die Website mit der Nachrechnung über viele Einstellungen und Extremfälle
-- `test_units.py` – Eingaben, Formatierung, Verlauf, Alarme, Teilen-Link, API-Ausfälle, Sortierung, Charts
-- `test_econ.py` – Rechenfunktionen der Markt-Analyse gegen numpy
-- `test_categories.py` – Kategorien (Mining, Farming, Weapons …)
-- `test_ah.py` – Auction House: Item-Daten lesen, Item-ID, Lowest BIN
-- `live/` – Abgleich der Live-Preise mit einer zweiten, unabhängigen Rechnung (Workflow „Prüfung Live-Preise“)
-- `testdata.py` – realistische und extreme Testdaten (leere Orderbücher, Riesenpreise, gefährliche Namen …)
+| Datei | prüft | Dauer |
+|---|---|---|
+| `test_forecast.mjs` | Preisprognose: Schätzung, Simulation, Zielpreis, Kalibrierung (Node) | ~10 s |
+| `test_econ.py` | Rechenfunktionen der Markt-Analyse gegen numpy | ~2 s |
+| `test_categories.py` | Kategorien (Mining, Farming, Weapons …) | <1 s |
+| `test_ah.py` | Auction House: Item-Daten lesen, Item-ID, Lowest BIN | <1 s |
+| `test_pipeline.mjs` | Trockenlauf von `tools/build_market.mjs` mit Testantworten (`pipeline/mockfetch.mjs`) | <1 s |
+| `smoke/smoke.py` | jede Seite mit Testdaten öffnen: Fehler, kaputte Zahlen; `AUDIT=1`: Überstand in 7 Breiten; `CS=dark` | ~80 s |
+| `test_units.py` | Bedienung: Eingaben, Formatierung, Teilen-Link, API-Ausfälle, Sortierung, Charts | ~25 s |
+| `test_numbers.py` | jede Zahl des Flippers gegen eine unabhängige Nachrechnung (`oracle.py`) über viele Einstellungen | ~20 min |
+| `live/` | Lowest BIN live gegen eine zweite Rechnung (Workflow „Prüfung Live-Preise“) | – |
 
-Voraussetzung: Python mit `playwright` und ein Chrome. Seite lokal starten (`python3 -m http.server 8765`
-im Hauptordner), dann `python3 tests/test_numbers.py` und `python3 tests/test_units.py`.
+Testdaten: `testdata.py` (Bazaar, realistisch und extrem), `fixtures/market.json` (Markt-Analyse).
+Screenshots des Rauchtests: `tests/smoke/out/` (nicht im Repository).

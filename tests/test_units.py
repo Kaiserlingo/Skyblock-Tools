@@ -7,7 +7,7 @@ def ok(cond, msg):
     else: fails.append(msg)
 async def main():
     async with async_playwright() as p:
-        b=await p.chromium.launch(executable_path="/usr/bin/google-chrome",args=["--no-proxy-server"])
+        b=await launch(p)
         ctx=await b.new_context(); pg=await ctx.new_page(); errs=[]; pg.on("pageerror",lambda e:errs.append(str(e)))
         snap={"success":True,"lastUpdated":1763540000000,"products":edge()}
         mode={"v":"ok"}
@@ -22,7 +22,7 @@ async def main():
             if m=="empty": return await route.fulfill(status=200,body=json.dumps({"success":True,"lastUpdated":snap["lastUpdated"]+999,"products":{}}),headers={"content-type":"application/json"})
             await route.fulfill(status=200,body=json.dumps(snap),headers={"content-type":"application/json"})
         await pg.route("https://api.hypixel.net/**",api); await pg.route("https://sky.coflnet.com/**",lambda r:r.fulfill(status=404,body='[]')); await pg.route("https://fonts.**",lambda r:r.abort())
-        await pg.goto("http://localhost:8765/#bazaar/flips"); await pg.wait_for_timeout(1500)
+        await pg.goto(BASE+"#bazaar/flips"); await pg.wait_for_timeout(1500)
         await pg.evaluate("S.paused=true; clearTimeout(S.timer)")
         E=lambda js: pg.evaluate(js)
         # ---- parseCoins ----
@@ -63,11 +63,11 @@ async def main():
         await E("S.set.budget=123456789; S.set.preset='safe'; S.set.tax=1"); link=await E("shareLink()")
         await E("S.set.budget=1; S.set.tax=1.25"); await pg.goto(link); await pg.wait_for_timeout(1200)
         st=await E("[S.set.budget,S.set.tax,location.hash]"); ok(st==[123456789,1,'#bazaar/overview'], f"Teilen-Link: {st}")
-        await pg.goto("http://localhost:8765/#bazaar/overview~%%%kaputt"); await pg.wait_for_timeout(1000)
+        await pg.goto(BASE+"#bazaar/overview~%%%kaputt"); await pg.wait_for_timeout(1000)
         ok(await E("location.hash")=='#bazaar/overview', "kaputter Link: Hash nicht bereinigt")
         bad=json.dumps({"budget":"<script>","tax":"x","evil":1}); import base64
         code=base64.urlsafe_b64encode(bad.encode()).decode().rstrip('=')
-        await pg.goto("http://localhost:8765/#bazaar/overview~"+code); await pg.wait_for_timeout(1000)
+        await pg.goto(BASE+"#bazaar/overview~"+code); await pg.wait_for_timeout(1000)
         st=await E("[typeof S.set.budget, S.set.evil===undefined, typeof S.set.tax]"); ok(st==['number',True,'number'], f"Link mit falschen Typen übernommen: {st}")
         await E("S.paused=true; clearTimeout(S.timer)")
         # ---- API-Ausfälle ----
@@ -118,4 +118,7 @@ async def main():
         ok(not errs, f"JS-Fehler: {errs}")
         await b.close()
     print(f"bestanden: {passed[0]}, Fehler: {len(fails)}"); [print("  ✗",f) for f in fails]
-asyncio.run(main())
+from web import serve, launch
+with serve() as BASE:
+    asyncio.run(main())
+sys.exit(1 if fails else 0)

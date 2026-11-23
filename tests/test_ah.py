@@ -1,6 +1,6 @@
-"""Prüft tools/ah_lib.mjs: NBT lesen, Item-ID zuordnen, Lowest BIN berechnen (mit selbst erzeugten Item-Daten)."""
+"""Prüft tools/lib/ah.mjs: NBT lesen, Item-ID zuordnen, Lowest BIN berechnen (mit selbst erzeugten Item-Daten)."""
 import struct, gzip, base64, json, subprocess, os, random
-HERE = os.path.dirname(os.path.abspath(__file__)); LIB = os.path.join(HERE, '..', 'tools', 'ah_lib.mjs')
+HERE = os.path.dirname(os.path.abspath(__file__)); LIB = os.path.join(HERE, '..', 'tools', 'lib', 'ah.mjs')
 def s(x): b = x.encode(); return struct.pack('>H', len(b)) + b
 def tagv(v):
     if isinstance(v, bool): return 1, struct.pack('>b', int(v))

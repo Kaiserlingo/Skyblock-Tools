@@ -2,22 +2,13 @@
 // Läuft alle 10 Minuten als GitHub Action (.github/workflows/prices.yml).
 // Aufruf: node tools/build_prices.mjs <ausgabe.json> [vorherige.json]
 import {readFileSync, writeFileSync, existsSync} from 'node:fs';
-import {aggregate, decodeItemBytes, itemKey} from './ah_lib.mjs';
+import {aggregate, decodeItemBytes, itemKey} from './lib/ah.mjs';
+import {get as getJSON, sleep} from './lib/http.mjs';
 
 const OUT = process.argv[2] || 'prices.json', PREV = process.argv[3];
 const H = 'https://api.hypixel.net/v2/skyblock/';
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-async function get(url, tries = 5){
-  for (let k = 0; k < tries; k++){
-    try{
-      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 30e3);
-      const r = await fetch(url, {signal: ctl.signal}); clearTimeout(to);
-      if (r.status === 429){ await sleep(5000 * (k + 1)); continue; }
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const j = await r.json(); if (!j.success) throw new Error('success=false'); return j;
-    }catch(e){ if (k === tries - 1) throw new Error(url + ': ' + e.message); await sleep(1500 * (k + 1)); }
-  }
-}
+// Hypixel verlangt success=true; bei 429 kurz warten (die Auktionsseiten sind nicht gedrosselt)
+const get = url => getJSON(url, {success: true, wait429: 5000, pause: 1500, tries: 5});
 // Alle Seiten müssen zum selben Stand gehören, sonst fehlen oder doppeln sich Auktionen.
 // Hypixel liefert einzelne Seiten manchmal noch aus einem älteren Cache: diese Seiten werden
 // gezielt neu geholt, bis alle denselben (neuesten) Stand haben.

@@ -1,6 +1,6 @@
 """Prüft js/categories.js mit kleinen, eindeutigen Beispielen."""
 import json, subprocess, os
-HERE = os.path.dirname(os.path.abspath(__file__)); CAT = os.path.join(HERE, '..', 'js', 'categories.js')
+HERE = os.path.dirname(os.path.abspath(__file__)); CAT = os.path.join(HERE, '..', 'js', 'lib', 'categories.js')
 js = r"""
 const C = require(%s);
 const f = C.make([{id:'IRON_SWORD_X',category:'SWORD'},{id:'X_BOOSTER',category:'BOOSTER'},{id:'D1',dungeon_item:true},{id:'D2',dungeon_item:true,category:'HELMET'},

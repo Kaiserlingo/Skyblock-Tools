@@ -1,7 +1,7 @@
 name: Prüfung Live-Preise
 
 # Rechnet den Lowest BIN jedes Items aus demselben Auktions-Stand zweimal unabhängig aus
-# (tools/ah_lib.mjs und ein eigener Python-NBT-Leser) und vergleicht alle Items.
+# (tools/lib/ah.mjs und ein eigener Python-NBT-Leser) und vergleicht alle Items.
 on:
   workflow_dispatch:
 

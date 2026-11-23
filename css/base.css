@@ -1,5 +1,5 @@
-/* SkyBlock Tools – ruhiges, helles Arbeitswerkzeug.
-   Akzent: Smaragdgrün (Kaufseite, Aktionen), Bernstein (Verkaufsseite). */
+/* SkyBlock Tools – Grundgerüst: Layout, Abstände, Komponenten (Tabellen, Karten, Formulare, Diagramm).
+   Farben und Aussehen kommen aus theme.css, das danach geladen wird und hier Werte überschreibt. */
 :root{
   --paper:#f7f7f4;
   --surface:#ffffff;

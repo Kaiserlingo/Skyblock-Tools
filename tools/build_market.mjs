@@ -5,17 +5,16 @@ import {createRequire} from 'node:module';
 import {readFileSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {get, pool, HYPIXEL, COFL, DATA} from './lib/http.mjs';
 
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const E = require(join(ROOT, 'js', 'econ.js'));
-const FC = require(join(ROOT, 'js', 'forecast.js'));
+const E = require(join(ROOT, 'js', 'lib', 'econ.js'));
+const FC = require(join(ROOT, 'js', 'lib', 'forecast.js'));
 const DAY = E.DAY;
 const OUT = process.argv[2] || 'market.json';
 const LIMIT = process.argv.includes('--limit') ? +process.argv[process.argv.indexOf('--limit') + 1] : Infinity;
-const H = 'https://api.hypixel.net/v2/', C = 'https://sky.coflnet.com/api/';
-const UA = {'User-Agent': 'SkyBlockTools-Marktanalyse (github.com/Kaiserlingo/Skyblock-Tools)'};
-const sleep = ms => new Promise(r => setTimeout(r, ms));
+const H = HYPIXEL, C = COFL;
 const DAYS = 366;              // ein Jahr + heute
 const LONG = 520;              // für die Kalibrierung der Preisprognose: etwa 17 Monate
 const LIQUID = 5e6;            // Coins Umsatz pro Tag, ab dem ein Item in Ranglisten zählt
@@ -24,28 +23,6 @@ const MIN_WEEK = 700;          // mindestens so viele Instabuys UND Instasells p
 const r4 = x => x == null || !isFinite(x) ? null : Math.round(x * 1e4) / 1e4;
 const r6 = x => x == null || !isFinite(x) ? null : Math.round(x * 1e6) / 1e6;
 const sig = x => x == null || !isFinite(x) ? null : +x.toPrecision(5);
-
-async function get(url, tries = 5){
-  for (let k = 0; k < tries; k++){
-    try{
-      const ctl = new AbortController(), to = setTimeout(() => ctl.abort(), 30e3);
-      const r = await fetch(url, {headers: UA, signal: ctl.signal}); clearTimeout(to);
-      if (r.status === 204) return [];
-      if (r.status === 429){ await sleep(15e3 * (k + 1)); continue; }
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      return await r.json();
-    }catch(e){ if (k === tries - 1) throw new Error(url + ': ' + e.message); await sleep(2000 * 2 ** k); }
-  }
-  throw new Error(url + ': zu viele Anfragen');
-}
-async function pool(items, n, fn){
-  const out = new Array(items.length); let i = 0, done = 0;
-  await Promise.all(Array.from({length: n}, async () => {
-    while (i < items.length){ const k = i++; try{ out[k] = await fn(items[k]); }catch(e){ out[k] = null; console.warn(e.message); }
-      if (++done % 200 === 0) console.log(`  ${done}/${items.length}`); await sleep(120); }
-  }));
-  return out;
-}
 
 const now = Date.now(), today = E.dayStart(now);
 console.log('Lade Grunddaten …');
@@ -60,8 +37,8 @@ const names = {};
 for (const it of coflItems || []) if (it.tag && it.name) names[it.tag] = it.name;
 for (const it of itemsRes.items || []) names[it.id] = it.name.replace(/§./g, '');
 
-/* ---------- Kategorien (js/categories.js, dieselbe Einteilung wie auf der Website) ---------- */
-const Cat = require(join(ROOT, 'js', 'categories.js'));
+/* ---------- Kategorien (js/lib/categories.js, dieselbe Einteilung wie auf der Website) ---------- */
+const Cat = require(join(ROOT, 'js', 'lib', 'categories.js'));
 const SECTORS = Object.fromEntries(Cat.ORDER.map(k => [k, Cat.CATS[k]]));
 const sector = Cat.make(itemsRes.items || [], coll.collections || {}, recipes);
 const P = bz.products;
@@ -188,7 +165,7 @@ try{
   const bzCal = FC.calibrate(bzList, {log});
   let ahCal = null;
   try{
-    const px = await get('https://raw.githubusercontent.com/Kaiserlingo/Skyblock-Tools/data/prices.json');
+    const px = await get(DATA + 'prices.json');
     const tags = Object.entries(px.items || {}).sort((a, b) => (b[1].n || 0) - (a[1].n || 0)).slice(0, process.env.MOCK ? 5 : 300).map(x => x[0]);
     const ah = await pool(tags, 4, t => get(C + `item/price/${encodeURIComponent(t)}/history/full`));
     const ahList = ah.map(arr => {

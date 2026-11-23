@@ -4,25 +4,20 @@ Persönliche Tool-Sammlung für **Hypixel SkyBlock**
 
 **Live:** https://kaiserlingo.github.io/Skyblock-Tools/
 
-## Dateien
+## Für Änderungen
+
+- **Aufbau und Anleitungen:** [docs/ARCHITEKTUR.md](docs/ARCHITEKTUR.md) – welche Datei was macht und Schritt-für-Schritt-Rezepte
+  (neue Seite, neue Kennzahl, neue Daten aus der Pipeline, Farben).
+- **Prüfen:** `tools/check.sh --fast` (Sekunden) oder `tools/check.sh` (alles inkl. Browser-Tests, ~3 min).
+- **Veröffentlichen:** `tools/publish.sh "Was sich geändert hat"`.
 
 ```
-index.html                 Seitengerüst
-css/style.css              Design
-js/chart.js                Chart mit Zoom, Indikatoren und Zeichenwerkzeugen
-js/app.js                  Startbildschirm, Bazaar Flipper (pausiert), gemeinsame Helfer
-js/econ.js                 Rechenfunktionen der Markt-Analyse (Index, Renditen, Risiko, Elastizität …)
-js/categories.js           Kategorien aller Items (Mining, Farming, Weapons …)
-js/markt.js                Markt-Analyse: Übersicht, Alle Items, Updates & Mayors, Item-Analyse
-data/recipes.json          Crafting-Rezepte (automatisch aktualisiert)
-tools/update_recipes.py    erzeugt recipes.json aus dem NotEnoughUpdates-REPO
-tools/build_prices.mjs     baut prices.json (Lowest BIN aller Auction-House-Items, etwa alle 5 Minuten)
-tools/build_market.mjs     baut täglich market.json (Tagesdaten aller Bazaar-Items, Indizes, Update-/Mayor-Wirkung)
-tools/stamp_assets.py      hängt Versions-Hashes an CSS/JS (vor jedem Commit ausführen)
-tests/                     Prüfungen aller Zahlen (Python + Playwright, numpy)
-.github/workflows/         wöchentliches Rezept-Update, tägliche Marktdaten (Branch data)
+index.html      Seitengerüst          css/       base.css (Layout), theme.css (Aussehen)
+js/core/        Rahmen, Routing       js/lib/    Rechenkerne (Browser + Node)
+js/bazaar/      Bazaar Flipper        js/markt/  Markt-Analyse + Preisprognose
+js/home/        Startseite            tools/     Pipeline (GitHub Actions) und Werkzeuge
+tests/          Prüfungen             docs/      Dokumentation
 ```
-
 
 ## Datenquellen
 
@@ -30,7 +25,8 @@ tests/                     Prüfungen aller Zahlen (Python + Playwright, numpy)
 - Item-Namen & NPC-Preise: `https://api.hypixel.net/v2/resources/skyblock/items`
 - Rezepte: [NotEnoughUpdates-REPO](https://github.com/NotEnoughUpdates/NotEnoughUpdates-REPO)
 - Mayor, Wahl, Patchnotes, Firesales: Hypixel `/v2/resources/skyblock/election`, `/v2/skyblock/news`, `/v2/skyblock/firesales`
-- Tagesdaten aller Bazaar-Items: `market.json` auf dem Branch `data`, täglich per GitHub Action
+- Tagesdaten aller Bazaar-Items, Prognose-Kalibrierung: `market.json` auf dem Branch `data`, alle 6 Stunden per GitHub Action
+- Lowest BIN aller Auction-House-Items: `prices.json` auf dem Branch `data`, etwa alle 5 Minuten
 - Preisverlauf: [SkyCofl](https://sky.coflnet.com/data) (`/api/bazaar/{item}/history/…`), Prices provided by SkyCofl
 
 Der Preisverlauf wird lokal im Browser (IndexedDB) gespeichert. Es gibt keinen Server und keine Konten: Jede Person, die die Seite öffnet, hat ihre eigenen Eingaben – sie bleiben nur in ihrem eigenen Browser.
