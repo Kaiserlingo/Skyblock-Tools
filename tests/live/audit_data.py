@@ -190,6 +190,9 @@ def main():
             if badk or badq: diffs.append({'id': i, 'f': 'stats', 'keys': badk, 'sq': badq[:5], 'pub': {k: ps.get(k) for k in badk}, 'neu': {k: ss[k] for k in badk}})
             else: stat['stats'][0] += 1
         else: stat['stats'][0] += 1
+    # Rohdaten der Items mit abweichenden Kennzahlen aufheben (zum Nachvollziehen ohne Internet)
+    badids = {d['id'] for d in diffs if d['f'] not in ('p24', 'stats', 'abruf')}
+    json.dump({i: {'a': a, 'b': b} for i, a, b, err in raw if i in badids}, open(out_path.replace('.json', '_roh.json'), 'w'))
     rep = {'built': built, 'sample': len(sample), 'ok': {k: f'{a}/{b}' for k, (a, b) in stat.items()}, 'diffs': diffs[:400], 'ndiff': len(diffs)}
     json.dump(rep, open(out_path, 'w'), indent=1)
     print(json.dumps(rep['ok'], indent=1)); print('Abweichungen:', len(diffs))
