@@ -74,6 +74,7 @@ window.siteAudit = async function(opt = {}){
   const pick = opt.ids || liq.sort(() => Math.random() - .5).slice(0, opt.n || 8);
   const ahIds = opt.ah || ['HYPERION', 'JUJU_SHORTBOW', 'TERMINATOR', 'ASPECT_OF_THE_END'];
   for (const id of pick.concat(ahIds)){
+    K.itTab = 'forecast';
     const ok = await go('#markt/item/' + encodeURIComponent(id), () => K.it && K.it.id === id && K.it.ready && K.it.A && K.it.fc !== undefined && document.querySelector('.pg-tile, .pg .note, #mi-body .note'), 40000);
     if (!chk('Item-Seite lädt', ok, id)) continue;
     await until(() => !(K.it.fcBT === null), 20000);
