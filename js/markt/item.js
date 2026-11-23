@@ -20,7 +20,7 @@ function itemHead(id){
   const tier = h && h.tier ? title(h.tier) : (S.tiers[id] ? title(S.tiers[id]) : '');
   const cat = catOf(id);
   let px = '';
-  if (k.bz && r && (r.topBuy || r.topSell)) px = `<dl class="figures mk-fig"><div><dt>Instabuy</dt><dd class="amber">${price(r.topSell)}</dd></div><div><dt>Instasell</dt><dd class="pos">${price(r.topBuy)}</dd></div><div><dt>Spread</dt><dd>${r.topBuy && r.topSell ? P((r.topSell - r.topBuy) / r.topSell, false) : '–'}</dd></div><div><dt>Umsatz pro Tag</dt><dd>${fmt(((r.wBuy || 0) + (r.wSell || 0)) * (r.topBuy || r.topSell) / 7)}</dd></div></dl>
+  if (k.bz && r && (r.topBuy || r.topSell)) px = `<dl class="figures mk-fig"><div><dt>Instabuy</dt><dd class="amber">${price(r.topSell)}</dd></div><div><dt>Instasell</dt><dd class="pos">${price(r.topBuy)}</dd></div><div><dt>Spread</dt><dd>${r.topBuy && r.topSell ? pct(r.spreadPct, false) : '–'}</dd></div><div><dt>Umsatz pro Tag</dt><dd>${fmt(((r.wBuy || 0) + (r.wSell || 0)) * (r.topBuy || r.topSell) / 7)}</dd></div></dl>
     <p class="hint mk-src">Live aus dem Bazaar, Stand ${new Date(S.lastUpdated).toLocaleTimeString('de-AT')}.</p>`;
   else if (k.ah){
     const s = I && I.ah && I.ah.sold;

@@ -52,6 +52,7 @@ async def run(name, snap, items, stats):
         npc={i['id']:i['npc_sell_price'] for i in items['items'] if i.get('npc_sell_price')}
         combos=0
         for preset, budget, tax, share, cb, cs, hide, mc, sr, ok in itertools.product(['safe','balanced','risky'],[1e6,10e6,1e9],[1.25,1.0],[1,10,50],['order','insta'],['offer','insta'],[True,False],[1,5,60],[None,1.2,4,1000],[None,0,80]):
+            if LIVE and (tax,share,cb,cs,hide,mc,sr,ok)!=(1.25,10,'order','offer',True,5,None,None): continue
             if (sr,ok)!=(None,None) and (cb,cs,budget,share,mc)!=('order','offer',10e6,10,5): continue
             if (cb,cs)!=('order','offer') and (budget,share,hide)!=(10e6,10,True): continue
             if mc!=5 and (preset,tax,hide)!=('balanced',1.25,True): continue
@@ -74,8 +75,10 @@ async def run(name, snap, items, stats):
         await pg.evaluate("applyPreset('balanced'); Object.assign(S.set,{budget:10e6,tax:1.25,share:10,minCycle:5}); ingest(false)")
         st=await pg.evaluate("S.set"); rows={pid:item(pid,pr,st,npc) for pid,pr in snap['products'].items()}
         n=0
-        for pid,pr in snap['products'].items():
-            r=rows[pid]
+        calc_ids=sorted(snap['products'])
+        if LIVE: calc_ids=random.Random(5).sample(calc_ids, min(60, len(calc_ids)))
+        for pid in calc_ids:
+            pr=snap['products'][pid]; r=rows[pid]
             if not (r['topBuy'] and r['topSell']): continue
             for q in [1,64,1000,71680,250000]:
                 for bm,sm in [('order','offer'),('order','insta'),('insta','offer'),('insta','insta')]:
@@ -95,8 +98,17 @@ async def run(name, snap, items, stats):
         xss=await pg.evaluate("window.__xss||0")
         await b.close()
         return combos, n, errs, xss
+LIVE=__import__('os').environ.get('LIVE_DIR')   # Live-Prüfung: echte Daten aus diesem Ordner (bazaar.json, items.json, bazaar_stats.json)
 async def main():
     global SITEMS, LOADED
+    if LIVE:
+        ld=lambda f: json.load(open(__import__('os').path.join(LIVE,f)))
+        snap,items,stats=ld('bazaar.json'),ld('items.json'),ld('bazaar_stats.json')
+        SITEMS=stats['items']; LOADED=True
+        combos,n,errs,xss=await run('live',snap,items,stats)
+        print(f"live ({len(snap['products'])} Items): {combos} Einstellungs-Kombinationen, {n} Rechner-Fälle, Seitenfehler={errs}")
+        print("FEHLER:",len(fails)); [print(" ",f) for f in fails[:80]]
+        return
     for name, P, withstats in [("realistisch", realistic(), True), ("extrem", edge(), True), ("ohne Verlauf", realistic(), False)]:
         snap={"success":True,"lastUpdated":1763540000000,"products":P}
         items={"success":True,"items":ITEMS_EXTRA}

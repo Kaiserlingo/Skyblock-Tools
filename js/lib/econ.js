@@ -321,7 +321,7 @@ E.book = function(product){
   const bid = dem[0] ? dem[0].pricePerUnit : null, ask = sup[0] ? sup[0].pricePerUnit : null;
   const mid = bid && ask ? (bid + ask) / 2 : bid || ask;
   const within = (arr, f, dir) => arr.filter(l => dir < 0 ? l.pricePerUnit >= mid * (1 - f) : l.pricePerUnit <= mid * (1 + f)).reduce((s, l) => s + l.amount, 0);
-  return {demand: cum(dem), supply: cum(sup), bid, ask, mid, spread: bid && ask ? ask - bid : null, spreadPct: bid && ask ? (ask - bid) / mid : null,
+  return {demand: cum(dem), supply: cum(sup), bid, ask, mid, spread: bid && ask ? ask - bid : null, spreadPct: bid && ask ? (ask - bid) / bid : null,   // wie im Flipper: bezogen auf die Buy-Order
           d: side(dem), s: side(sup), depth2: {demand: mid ? within(dem, .02, -1) : 0, supply: mid ? within(sup, .02, 1) : 0},
           imbalance: (() => { const a = dem.reduce((s, l) => s + l.amount, 0), b = sup.reduce((s, l) => s + l.amount, 0); return a + b ? (a - b) / (a + b) : null; })()};
 };

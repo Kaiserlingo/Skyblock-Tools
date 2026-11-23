@@ -66,7 +66,7 @@ PAGES.item = function(){
 function anaFigures(r){
   return figures([
     ['Instabuy', `<span class="amber">${price(r.topSell)}</span>`], ['Instasell', `<span class="pos">${price(r.topBuy)}</span>`],
-    ['Flip-Gewinn pro Stück', `<span class="${cls(r.profit)}">${price(r.profit)}</span>`], ['Profit pro Stunde', fmt(r.pph)],
+    ['Flip-Gewinn pro Stück', `<span class="${cls(r.profit)}">${price(r.profit)}</span>`], ['Profit pro Stunde', fmt(r.pphTyp) + (r.pphTyp < r.pph ? `<small>jetzt ${fmt(r.pph)}</small>` : '')],   // wie in der Flip-Tabelle: mit üblichem Spread
   ]) + facts([
     ['Marge', pct(r.marginPct, false)], ['Spread', pct(r.spreadPct, false)], ['1 h', `<span class="${cls(r.d1h)}">${pct(r.d1h)}</span>`], ['24 h', `<span class="${cls(r.d24h)}">${pct(r.d24h)}</span>`],
     ['Instabuys pro Woche', fmt(r.wBuy)], ['Instasells pro Woche', fmt(r.wSell)], ['Handel pro Stunde', fmt(r.perHour)], ['Gefragt', liquid(r) ? 'ja' : 'nein'],

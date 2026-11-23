@@ -97,7 +97,7 @@ check('group mean', -0.1, r['g']['x']['mean']); check('group up share', .5, r['g
 prod = {'sell_summary': [{'amount': 100, 'pricePerUnit': 9.9, 'orders': 2}, {'amount': 50, 'pricePerUnit': 9.5, 'orders': 1}],
         'buy_summary': [{'amount': 10, 'pricePerUnit': 10.1, 'orders': 1}, {'amount': 300, 'pricePerUnit': 10.5, 'orders': 3}]}
 r = node(f"const b=E.book({json.dumps(prod)}); return {{b, w:E.walk(b.supply.map(x=>({{amount:x.amount,pricePerUnit:x.p}})),100)}};")
-b = r['b']; check('mid', 10.0, b['mid']); check('spreadPct', .02, b['spreadPct']); check('cum demand', 150.0, float(b['demand'][1]['q']))
+b = r['b']; check('mid', 10.0, b['mid']); check('spreadPct (auf Buy-Order bezogen)', .2 / 9.9, b['spreadPct']); check('cum demand', 150.0, float(b['demand'][1]['q']))
 check('hhi', (100/150)**2 + (50/150)**2, b['d']['hhi']); check('depth2 supply', 10.0, float(b['depth2']['supply'])); check('imbalance', (150 - 310) / 460, b['imbalance'])
 check('walk avg', (10 * 10.1 + 90 * 10.5) / 100, r['w']['avg'])
 

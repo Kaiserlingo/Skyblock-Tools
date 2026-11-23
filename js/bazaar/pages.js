@@ -216,7 +216,7 @@ function renderDetail(update){
   const h = S.hist[id];
   const top = figures([
     ['Instabuy', `<span class="amber">${price(r.topSell)}</span>`], ['Instasell', `<span class="pos">${price(r.topBuy)}</span>`],
-    ['Flip-Gewinn pro Stück', `<span class="${cls(r.profit)}">${price(r.profit)}</span>`], ['Profit pro Stunde', fmt(r.pph)],
+    ['Flip-Gewinn pro Stück', `<span class="${cls(r.profit)}">${price(r.profit)}</span>`], ['Profit pro Stunde', fmt(r.pphTyp) + (r.pphTyp < r.pph ? `<small>jetzt ${fmt(r.pph)}</small>` : '')],   // wie in der Flip-Tabelle: mit üblichem Spread
   ]);
   const more = facts([
     ['Deine Buy-Order', price(r.buyAt)], ['Deine Sell-Offer', price(r.sellAt)], ['Marge', pct(r.marginPct, false)], ['Spread', pct(r.spreadPct, false)],

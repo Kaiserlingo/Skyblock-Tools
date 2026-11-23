@@ -20,7 +20,7 @@ function fcSides(I){
     const q = S.products[I.id] && S.products[I.id].quick_status;
     const base = q ? E.bazaarPrice({buy: q.buyPrice, sell: q.sellPrice, buyMovingWeek: q.buyMovingWeek, sellMovingWeek: q.sellMovingWeek}) : null;
     const rb = r('buy') || (q && base ? q.buyPrice / base : 1), rs = r('sell') || (q && base ? q.sellPrice / base : 1);
-    return {list: [['buy', 'Instabuy', rb], ['sell', 'Instasell', rs], ['mid', 'Marktpreis', 1]], live: base, liveSide: {buy: q && q.buyPrice, sell: q && q.sellPrice, mid: base},
+    return {list: [['buy', 'Instabuy', rb], ['sell', 'Instasell', rs], ['mid', 'Marktpreis', 1]], live: base, liveSide: {buy: (S.byId[I.id] && S.byId[I.id].topSell) || (q && q.buyPrice), sell: (S.byId[I.id] && S.byId[I.id].topBuy) || (q && q.sellPrice), mid: base},   // „jetzt“ = dieselben Preise wie im Kopf und im Flipper
       decay: {buy: fcDecay(pts, 'buy'), sell: fcDecay(pts, 'sell')}};
   }
   const px = pxOf(I.id), lb = px && px.b > 0 ? px.b : I.live && I.live.b;
