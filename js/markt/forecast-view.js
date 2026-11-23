@@ -263,7 +263,10 @@ function fcDriversHTML(I, F, side){
   const ch = (a, b, h) => Math.exp(a[h - 1] - b[h - 1]) - 1;
   const dev = Math.exp(F.y0 - fit.a) - 1, anchor = fcPx(F, side, fit.a);
   const half = fit.k > 0 ? Math.LN2 / fit.k : Infinity;
-  const tot31 = Math.exp(F.sim.q[H - 1][3] - F.y0) - 1, tot7 = Math.exp(F.sim.q[6][3] - F.y0) - 1;
+  // Veränderung der gewählten Preisart (Instabuy, Lowest BIN …) – dieselbe Zahl wie in Kacheln und Diagramm
+  const tot31 = fcDay(F, side, H).ch, tot7 = fcDay(F, side, 7).ch;
+  const b31 = Math.exp(F.sim.q[H - 1][3] - F.y0) - 1, b7 = Math.exp(F.sim.q[6][3] - F.y0) - 1;
+  const gap = fcNow(F, side) / fcPx(F, side, F.y0) - 1;
   const mi = F.my.info;
   const D = [
     {id: 'rev', name: dev >= 0 ? 'Preis ist gerade hoch' : 'Preis ist gerade niedrig', a: p.rev, b: p.trend,
@@ -275,6 +278,8 @@ function fcDriversHTML(I, F, side){
     {id: 'drift', name: 'Grundtendenz', a: p.trend, b: p.none,
      why: `Kleine Dauer-Bewegung aus dem ganzen Verlauf. Trends der letzten Wochen (${P(fit.trend.slope * 7)} pro Woche) werden nicht fortgeschrieben: In Rückwärtstests über alle Items sagten sie die Zukunft nicht voraus.`},
   ].map(d => { Object.assign(d, {c7: ch(d.a, d.b, 7), c31: ch(d.a, d.b, H)}); if (typeof d.why === 'function') d.why = d.why(d); return d; });
+  if (Math.abs(gap) > .002) D.unshift({id: 'side', name: `${side[1]} weicht gerade ab`, c7: (1 + tot7) / (1 + b7) - 1, c31: (1 + tot31) / (1 + b31) - 1,
+    why: `Der ${esc(side[1])} liegt jetzt ${P(Math.abs(gap), false)} ${gap > 0 ? 'über' : 'unter'} seinem üblichen Abstand zum ${I.k.bz ? 'Marktpreis' : 'Ø Verkaufspreis'}. Die Prognose rechnet damit, dass sich dieser Abstand wieder normalisiert.`});
   const mx = Math.max(.005, ...D.map(d => Math.abs(d.c31)), ...D.map(d => Math.abs(d.c7)));
   const bar = v => `<span class="pg-bar2"><i class="${v >= 0 ? 'up' : 'dn'}" style="${v >= 0 ? 'left:50%' : `right:50%`};width:${(Math.min(Math.abs(v) / mx, 1) * 50).toFixed(1)}%"></i></span>`;
   const top = D.slice().sort((x, y) => Math.abs(y.c31) - Math.abs(x.c31))[0];
@@ -289,7 +294,7 @@ function fcDriversHTML(I, F, side){
       <div class="pg-drv-h"><span></span><span>7 Tage</span><span>31 Tage</span></div>
       ${D.map(d => `<div class="pg-drv-r"><div class="pg-drv-n"><b>${d.name}</b><small>${d.why}</small></div>
         <div class="pg-drv-v"><span>7 Tage</span>${bar(d.c7)}${PC(d.c7)}</div><div class="pg-drv-v"><span>31 Tage</span>${bar(d.c31)}${PC(d.c31)}</div></div>`).join('')}
-      <div class="pg-drv-r sum"><div class="pg-drv-n"><b>Erwartete Veränderung</b><small>Mitte aller 2000 simulierten Verläufe. Weicht leicht von der Summe ab, weil große Sprünge nach oben häufiger sind als nach unten.</small></div>
+      <div class="pg-drv-r sum"><div class="pg-drv-n"><b>Erwartete Veränderung</b><small>${esc(side[1])}, Mitte aller 2000 simulierten Verläufe. Weicht leicht von der Summe ab, weil die Einflüsse nicht einfach addiert werden und Ausschläge nicht symmetrisch sind.</small></div>
         <div class="pg-drv-v"><span>7 Tage</span>${bar(tot7)}${PC(tot7)}</div><div class="pg-drv-v"><span>31 Tage</span>${bar(tot31)}${PC(tot31)}</div></div>
     </div>
     <h3 class="mk-h4">So lief es früher in ähnlicher Lage</h3>
