@@ -118,13 +118,14 @@ function forecastHTML(I){
       <dd class="pg-r"><span>Chance, dass es mehr kostet</span> ${NF0.format(fcUp(F, side, h) * 100)} %</dd></div>`;
   };
   const sideSeg = F.sides.list.length > 1 ? `<div class="cp-group"><span class="cp-l">Preis</span><div class="seg sm" role="group" aria-label="Preisart">${F.sides.list.map(([k, l]) => `<button data-fcside="${k}" class="${side[0] === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : '';
-  const max = new Date(F.at + FC_DAYS * DAY).toISOString().slice(0, 10), min = new Date(F.at + DAY).toISOString().slice(0, 10);
+  const ymd = t => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };   // Ortszeit, wie das Datumsfeld
+  const max = ymd(F.at + FC_DAYS * DAY), min = ymd(F.at + DAY);
   return `<section class="wide pg">
     <h2>Preisprognose</h2>
     <div class="pg-bar">${sideSeg}<p class="pg-now">Jetzt <b>${price(now)}</b> <span class="mut">${side[1]}, Grundlage: ${F.start}</span></p></div>
     <dl class="pg-tiles">${FCH.map(tile).join('')}</dl>
     ${pgPanel().html()}
-    <div class="pg-date"><label class="input pg-in"><span>Preis an einem Tag</span><input type="date" id="pg-date" min="${min}" max="${max}" value="${esc(K.fcDate || '')}" aria-label="Datum wählen"></label><div id="pg-dres">${pgDateResult(I, F, side)}</div></div>
+    <div class="pg-date"><div class="pg-dpick"><label for="pg-date">Preis an einem Tag</label><span class="input"><input type="date" id="pg-date" min="${min}" max="${max}" value="${esc(K.fcDate || '')}"></span></div><div id="pg-dres">${pgDateResult(I, F, side)}</div></div>
     <details class="pg-days"${K.fcDays ? ' open' : ''}><summary>Tag für Tag: erwarteter Preis für jedes Datum</summary>${pgTable(I, F, side)}</details>
   </section>
   ${fcTargetHTML(I, F, side)}
@@ -166,7 +167,7 @@ function pgHist(I, F, side, days){
   const val = p => sk === 'buy' || sk === 'sell' ? p[sk] : num(p.v) ? p.v * side[2] : null;
   if (days <= 7 && I.h7 && I.h7.length > 8){
     const pts = I.h7.filter(p => p.t >= from && num(val(p)));
-    return {t: pts.map(p => p.t), v: pts.map(val)};
+    return pgJoin(F, side, {t: pts.map(p => p.t), v: pts.map(val)});
   }
   let v = A.v.map(x => num(x) ? x * side[2] : null);
   if (I.k.bz && (sk === 'buy' || sk === 'sell')){
@@ -175,7 +176,14 @@ function pgHist(I, F, side, days){
   }
   const t = [], o = [];
   for (let i = 0; i < A.T.length; i++) if (A.T[i] >= from - DAY / 2 && num(v[i])){ t.push(A.T[i] + DAY / 2); o.push(v[i]); }
-  return {t, v: o};
+  return pgJoin(F, side, {t, v: o});
+}
+// Verlauf endet genau mit dem heutigen Preis (Startpunkt der Prognose) – sonst entstünde ein Knick zwischen letztem Tageswert und „jetzt“
+function pgJoin(F, side, h){
+  const t = [], v = [];
+  for (let i = 0; i < h.t.length; i++) if (h.t[i] < F.at - 30 * 60e3){ t.push(h.t[i]); v.push(h.v[i]); }
+  t.push(F.at); v.push(fcNow(F, side));
+  return {t, v};
 }
 function pgFeed(keepView){
   const I = K.it, F = I && I.fc, p = ChartPanels.pg, ch = p && p.chart; if (!ch || !F || F.err) return;

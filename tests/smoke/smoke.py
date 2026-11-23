@@ -123,6 +123,26 @@ async def main():
                 for r in ['7d', '1y', '30d']: await pg.click(f'[data-cp="pg"][data-cprange="{r}"]'); await pg.wait_for_timeout(150)
                 n = await pg.evaluate("(()=>{const c=ChartPanels.pg.chart; return [c.data.t.length, c.fc?c.fc.t.length:0]})()"); print('   pg chart pts', n)
                 if n[0] < 3 or n[1] != 32: PROBLEMS.append(f'Prognose {fid}: Diagramm {n}')
+                # Zahlen müssen überall gleich sein: Verlaufsende = jetzt = Prognosestart, Kacheln = Tabelle = Legende = Fazit
+                cons = await pg.evaluate(r'''(()=>{const I=Markt._K.it,F=I.fc,side=fcSide(I,F),c=ChartPanels.pg.chart,d=c.data,f=c.fc,now=fcNow(F,side),bad=[];
+                  const near=(a,b)=>Math.abs(a/b-1)<1e-9;
+                  if(!near(d.hi[d.t.length-1],now)) bad.push('Verlaufsende '+d.hi[d.t.length-1]+' != jetzt '+now);
+                  if(d.t[d.t.length-1]!==f.t[0]) bad.push('Zeit Verlaufsende != Prognosestart');
+                  if(!near(f.med[0],now)) bad.push('Prognosestart != jetzt');
+                  for(let i=1;i<d.t.length;i++) if(d.t[i]<=d.t[i-1]) {bad.push('Zeiten nicht aufsteigend');break;}
+                  for(const x of ['med','q10','q25','q75','q90']) for(let k=0;k<f.t.length;k++) if(!(f[x][k]>0)) {bad.push('Prognosewert '+x+k);break;}
+                  for(let k=1;k<f.t.length;k++) if(!(f.q10[k]<=f.q25[k]&&f.q25[k]<=f.med[k]&&f.med[k]<=f.q75[k]&&f.q75[k]<=f.q90[k])) {bad.push('Bereiche ungeordnet Tag '+k);break;}
+                  const tiles=[...document.querySelectorAll('.pg-tile')].map(t=>t.querySelector('dd b').textContent);
+                  [1,7,31].forEach((h,i)=>{ if(tiles[i]!==price(fcDay(F,side,h).med)) bad.push('Kachel '+h); });
+                  const rows=[...document.querySelectorAll('.pg-tbl tbody tr')]; const r7=rows[6].children[1].textContent, r31=rows[30].children[1].textContent;
+                  if(r7!==tiles[1]||r31!==tiles[2]) bad.push('Tabelle != Kacheln '+[r7,tiles[1],r31,tiles[2],rows.length].join('|'));
+                  const leg=document.querySelector('#pg-legend b:nth-of-type(1)');
+                  const v=document.querySelector('.pg-verdict').innerText, ch=fcDay(F,side,31).ch;
+                  if(Math.abs(ch)>=.01 && !v.includes(pct(Math.abs(ch)*100,false))) bad.push('Fazit '+v+' vs '+ch);
+                  const sum=[...document.querySelectorAll('.pg-drv-r.sum .pg-drv-v')][1].innerText; if(!sum.includes(pct(ch*100))) bad.push('Summe '+sum);
+                  return bad;})()''')
+                if cons: PROBLEMS.append(f'Prognose {fid}: {cons}')
+                print('   consistency', cons)
                 d = await pg.evaluate("new Date(Date.now()+10*864e5).toISOString().slice(0,10)")
                 await pg.fill('#pg-date', d); await pg.wait_for_timeout(200)
                 dr = await pg.inner_text('#pg-dres'); print('   date', dr[:200].replace('\n', ' / '))
