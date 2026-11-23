@@ -14,6 +14,7 @@ Browser-Tests starten ihren Webserver selbst (`tests/web.py`) und nutzen Chrome,
 | `test_units.py` | Bedienung: Eingaben, Formatierung, Teilen-Link, API-Ausfälle, Sortierung, Charts | ~25 s |
 | `test_numbers.py` | jede Zahl des Flippers gegen eine unabhängige Nachrechnung (`oracle.py`) über viele Einstellungen | ~20 min |
 | `live/` | Lowest BIN live gegen eine zweite Rechnung (Workflow „Prüfung Live-Preise“) | – |
+| `live/audit_*` | **Live-Prüfung mit echten Daten** (Workflow „Live-Prüfung“, startet auch per `git push -f origin HEAD:audit-run`; Bericht auf Branch `audit`): Pipeline-Daten gegen SkyCofl (eigene Python-Nachrechnung), Flipper mit echtem Hypixel-Stand gegen `oracle.py`, alle Bereiche der Oberfläche gegeneinander (`audit_page.js`, läuft auch in jedem Browser: Skript laden, `siteAudit()`), Überstand mit echten Daten | ~4 min |
 
 Testdaten: `testdata.py` (Bazaar, realistisch und extrem), `fixtures/market.json` (Markt-Analyse).
 Screenshots des Rauchtests: `tests/smoke/out/` (nicht im Repository).
