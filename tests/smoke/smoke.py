@@ -12,6 +12,17 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, os.path.di
 from web import serve, launch
 OUT = os.path.join(HERE, 'out'); os.makedirs(OUT, exist_ok=True)
 PROBLEMS = []
+def icon_png(seed):
+    """Kleines, je Item verschiedenes 16×16-Bild als PNG (ohne Zusatzpakete)."""
+    import hashlib, struct, zlib
+    h = hashlib.md5(seed.encode()).digest(); rows = b''
+    for y in range(16):
+        rows += b'\x00'
+        for x in range(16):
+            on = 3 <= x < 13 and 3 <= y < 13 and (x * y + h[0]) % 5
+            rows += bytes((h[1], h[2], h[3], 255) if on else (0, 0, 0, 0))
+    chunk = lambda t, d: struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    return b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 16, 16, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(rows)) + chunk(b'IEND', b'')
 md = json.load(open(os.path.join(os.path.dirname(HERE), 'fixtures', 'market.json')))
 now = int(time.time()*1000); DAY=86400000
 ids = list(md['items'].keys())
@@ -49,14 +60,7 @@ async def main():
             elif 'election' in u: body=election
             elif 'firesales' in u: body={'success':True,'sales':[{'item_id':ids[0],'start':now-1000,'end':now+DAY,'amount':1000,'price':10}]}
             elif 'static/icon/' in u:
-                import io, hashlib
-                from PIL import Image
-                h=hashlib.md5(u.encode()).digest(); im=Image.new('RGBA',(16,16),(0,0,0,0))
-                for x in range(3,13):
-                    for y in range(3,13):
-                        if (x*y+h[0])%5: im.putpixel((x,y),(h[1],h[2],h[3],255) if (x+y)%3 else (min(255,h[1]+60),min(255,h[2]+60),min(255,h[3]+60),255))
-                b=io.BytesIO(); im.save(b,'PNG')
-                return await route.fulfill(status=200, content_type='image/png', body=b.getvalue())
+                return await route.fulfill(status=200, content_type='image/png', body=icon_png(u))
             elif 'market.json' in u: body=md
             elif 'bazaar_stats.json' in u: body={'v':1,'built':now,'items':{i:{'sq':[round(0.005+0.002*k*(1+(n%5)),5) for k in range(21)],'am':(md['items'][i]['p'] or 100)*1.02,'bm':(md['items'][i]['p'] or 100)*(0.7 if n%9==0 else 1),'ra':0.03,'rb':0.03,'tr':-0.25 if n%7==0 else 0.02,'vt':0.1,'s30':0.02,'n':84} for n,i in enumerate(ids) if n%6}}
             elif 'prices.json' in u: body={'v':1,'built':now,'lastUpdated':now-60000,'auctions':39000,'bins':36000,'items':{'HYPERION':{'b':5.6e8,'l5':[5.6e8,5.7e8,6e8],'n':70,'seen':now,'name':'Hyperion'},'PET_BEE':{'b':80000,'l5':[80000],'n':20,'v':{'LEGENDARY':900000,'COMMON':80000},'seen':now,'name':'Bee'},'OLD_THING':{'b':None,'n':0,'last':123,'seen':now-86400000,'name':'Old Thing'}}}
