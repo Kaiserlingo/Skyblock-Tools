@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 const require = createRequire(import.meta.url);
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const E = require(join(ROOT, 'js', 'econ.js'));
+const FC = require(join(ROOT, 'js', 'forecast.js'));
 const DAY = E.DAY;
 const OUT = process.argv[2] || 'market.json';
 const LIMIT = process.argv.includes('--limit') ? +process.argv[process.argv.indexOf('--limit') + 1] : Infinity;
@@ -16,6 +17,7 @@ const H = 'https://api.hypixel.net/v2/', C = 'https://sky.coflnet.com/api/';
 const UA = {'User-Agent': 'SkyBlockTools-Marktanalyse (github.com/Kaiserlingo/Skyblock-Tools)'};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const DAYS = 366;              // ein Jahr + heute
+const LONG = 520;              // für die Kalibrierung der Preisprognose: etwa 17 Monate
 const LIQUID = 5e6;            // Coins Umsatz pro Tag, ab dem ein Item in Ranglisten zählt
 const INDEX_MIN = 2e7;         // … und ab dem es in die Preisindizes kommt
 const MIN_WEEK = 700;          // mindestens so viele Instabuys UND Instasells pro Woche (100 pro Tag)
@@ -84,7 +86,7 @@ console.log(`Lade Verläufe für ${ids.length} Items …`);
 // Raster: die letzten DAYS vollen Tage bis gestern (UTC). Der lange Verlauf kommt als Tagespunkte,
 // die letzten 7 Tage in 2-Stunden-Punkten (SkyCofl schreibt die Tagespunkte erst mit Verzögerung).
 const END = today - DAY;
-const from = new Date(END - (DAYS + 2) * DAY).toISOString(), to = new Date(now).toISOString(), from7 = new Date(now - 6.9 * DAY).toISOString(), CUT = END - 5 * DAY;   // SkyCofl liefert 2-Stunden-Punkte nur für Zeiträume bis 7 Tage
+const from = new Date(END - (LONG + 2) * DAY).toISOString(), to = new Date(now).toISOString(), from7 = new Date(now - 6.9 * DAY).toISOString(), CUT = END - 5 * DAY;   // SkyCofl liefert 2-Stunden-Punkte nur für Zeiträume bis 7 Tage
 const hist = await pool(ids, 4, async id => {
   const [a, b] = [await get(C + `bazaar/${encodeURIComponent(id)}/history?start=${from}&end=${to}`), await get(C + `bazaar/${encodeURIComponent(id)}/history?start=${from7}&end=${to}`).catch(() => [])];
   return {a, b};
@@ -104,6 +106,7 @@ const T = Array.from({length: DAYS}, (_, i) => END - (DAYS - 1 - i) * DAY);
 for (const id in series){
   const s = series[id];
   s.v = E.hampel(E.daily(s.pts, {days: DAYS, end: END}).v);
+  s.long = E.hampel(E.daily(s.pts, {days: LONG, end: END}).v);
   s.vol = E.daily(s.pts.map(p => ({t: p.t, v: p.mw})), {days: DAYS, end: END}).v;
   delete s.pts;
 }
@@ -173,6 +176,32 @@ for (const id of ids){
   items[id] = o;
 }
 
+/* ---------- Preisprognose: Kalibrierung aus Rückwärtstests ----------
+   Bazaar: jedes zweite Item mit mindestens 300 Tagen Verlauf. Auction House: die meistgehandelten Items
+   (nach Zahl der BIN-Angebote), Tagesverlauf des Ø Verkaufspreises wie in der Analyse. */
+let fc = null;
+try{
+  const t0 = Date.now(), log = m => console.log('  ' + m);
+  const enough = y => y.filter(v => v != null).length >= 300;
+  console.log('Prognose-Kalibrierung Bazaar …');
+  const bzList = Object.keys(series).sort().filter((_, i) => i % 2 === 0).map(id => FC.logs(series[id].long)).filter(enough);
+  const bzCal = FC.calibrate(bzList, {log});
+  let ahCal = null;
+  try{
+    const px = await get('https://raw.githubusercontent.com/Kaiserlingo/Skyblock-Tools/data/prices.json');
+    const tags = Object.entries(px.items || {}).sort((a, b) => (b[1].n || 0) - (a[1].n || 0)).slice(0, process.env.MOCK ? 5 : 300).map(x => x[0]);
+    const ah = await pool(tags, 4, t => get(C + `item/price/${encodeURIComponent(t)}/history/full`));
+    const ahList = ah.map(arr => {
+      const pts = (Array.isArray(arr) ? arr : []).map(o => ({t: E.parseUtc(o.time), v: +o.avg || null})).filter(p => isFinite(p.t) && p.v > 0);
+      return pts.length ? FC.logs(E.hampel(E.daily(pts, {days: LONG, end: END}).v)) : null;
+    }).filter(y => y && enough(y));
+    console.log(`Prognose-Kalibrierung Auction House (${ahList.length} Items) …`);
+    ahCal = FC.calibrate(ahList, {log});
+  }catch(e){ console.warn('AH-Kalibrierung übersprungen: ' + e.message); }
+  fc = {built: now, bz: bzCal, ah: ahCal};
+  console.log(`Prognose kalibriert in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+}catch(e){ console.warn('Prognose-Kalibrierung fehlgeschlagen: ' + e.message); }
+
 const cur = election.mayor || {};
 const out = {
   v: 5, eventWindow: W, recentCut: CUT, built: now, days: {from: T[0], to: T[T.length - 1]}, liquid: LIQUID, indexMin: INDEX_MIN, minWeek: MIN_WEEK,
@@ -181,6 +210,7 @@ const out = {
   index: {spi: spi.v.map(r6), n: spi.n, sec: Object.fromEntries(Object.entries(secIdx).map(([k, x]) => [k, x.v]))},
   news: newsList, updates, terms: terms.slice(-80), mayorFx,
   election: {mayor: cur.name ? {name: cur.name, key: cur.key, perks: (cur.perks || []).map(p => p.name), minister: cur.minister ? cur.minister.name : null} : null},
+  fc,
   items,
 };
 writeFileSync(OUT, JSON.stringify(out));
