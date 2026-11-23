@@ -1,0 +1,57 @@
+name: Live-Prüfung
+
+# Prüft die Website mit echten Daten (manuell oder per Push auf den Branch "audit-run"):
+#  1. Pipeline-Daten (market.json, bazaar_stats.json) gegen SkyCofl-Rohdaten, eigene Nachrechnung in Python
+#  2. Bazaar Flipper mit dem echten Hypixel-Stand gegen die unabhängige Nachrechnung (tests/oracle.py)
+#  3. Lowest BIN aller Items doppelt ausgerechnet (wie "Prüfung Live-Preise")
+# Bericht landet auf dem Branch "audit" (audit/bericht.txt und JSON-Dateien).
+on:
+  workflow_dispatch:
+  push:
+    branches: [audit-run]
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Abhängigkeiten
+        run: |
+          pip install numpy playwright
+          python -m playwright install --with-deps chromium
+      - name: Daten holen
+        run: |
+          mkdir -p live audit
+          git fetch -q origin data
+          for f in market.json bazaar_stats.json prices.json; do git show origin/data:$f > live/$f; done
+          curl -sf https://api.hypixel.net/v2/skyblock/bazaar -o live/bazaar.json
+          curl -sf https://api.hypixel.net/v2/resources/skyblock/items -o live/items.json
+      - name: Pipeline-Daten gegen SkyCofl
+        continue-on-error: true
+        run: python3 tests/live/audit_data.py live/market.json live/bazaar_stats.json audit/daten.json 160 2>&1 | tee audit/daten.txt
+      - name: Flipper mit echten Daten gegen die Nachrechnung
+        continue-on-error: true
+        run: LIVE_DIR=live python3 tests/test_numbers.py 2>&1 | tee audit/flipper.txt
+      - name: Lowest BIN doppelt gerechnet
+        continue-on-error: true
+        run: |
+          python3 tests/live/fetch_auctions.py auctions.json
+          node tests/live/agg_node.mjs auctions.json node.json
+          python3 tests/live/verify_prices.py auctions.json node.json 2>&1 | tee audit/lbin.txt
+      - name: Bericht ablegen (Branch audit)
+        if: always()
+        run: |
+          cd audit && (echo "Live-Prüfung $(date -u)"; for f in daten flipper lbin; do echo; echo "=== $f ==="; tail -60 $f.txt 2>/dev/null; done) > bericht.txt
+          git init -q -b audit && git add -A
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "Live-Prüfung"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" audit
