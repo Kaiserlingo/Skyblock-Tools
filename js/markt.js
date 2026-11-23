@@ -1002,7 +1002,8 @@ function fcGet(I){
   if (!f || f.A !== I.A || Date.now() - f.at > 10 * 60e3 || (live && f.liveAt && Math.abs(live / f.liveAt - 1) > .005)){ I.fc = fcRun(I); if (I.fc) I.fc.A = I.A; }
   return I.fc;
 }
-function fcSide(I, F){ const L = F.sides.list; return L.find(s => s[0] === K.fcSide) || L[0]; }
+// Standard: Bazaar Instabuy (Kaufpreis), Auction House Lowest BIN (was man wirklich zahlt)
+function fcSide(I, F){ const L = F.sides.list; return L.find(s => s[0] === K.fcSide) || L.find(s => s[0] === 'lbin') || L[0]; }
 const fcPx = (F, side, ly) => Math.exp(ly) * side[2];
 function fcWhen(days){
   if (days == null) return null;
