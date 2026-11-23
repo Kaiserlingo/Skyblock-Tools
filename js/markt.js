@@ -1005,6 +1005,8 @@ function fcGet(I){
 // Standard: Bazaar Instabuy (Kaufpreis), Auction House Lowest BIN (was man wirklich zahlt)
 function fcSide(I, F){ const L = F.sides.list; return L.find(s => s[0] === K.fcSide) || L.find(s => s[0] === 'lbin') || L[0]; }
 const fcPx = (F, side, ly) => Math.exp(ly) * side[2];
+// heutiger Preis der gewählten Seite: live, wenn vorhanden (die Prognose rechnet mit dem üblichen Abstand der Seiten)
+const fcNow = (F, side) => F.sides.liveSide[side[0]] > 0 ? F.sides.liveSide[side[0]] : fcPx(F, side, F.y0);
 function fcWhen(days){
   if (days == null) return null;
   const t = Date.now() + days * DAY;
@@ -1020,7 +1022,7 @@ function forecastHTML(I){
   if (!F) return card('Preisprognose', '', '<p class="loading">Lädt …</p>', true);
   if (F.err) return card('Preisprognose', '', `<p class="note">${F.err}</p>`, true);
   const side = fcSide(I, F), s = F.sim, cfg = F.cfg;
-  const now = fcPx(F, side, F.y0);
+  const now = fcNow(F, side);
   const tile = ([h, label]) => {
     const q = s.q[h - 1], med = fcPx(F, side, q[3]);
     return `<div class="pg-tile"><dt>${label}</dt><dd><b>${price(med)}</b> ${PC(med / now - 1)}</dd>
@@ -1033,7 +1035,7 @@ function forecastHTML(I){
   return `<section class="wide pg">
     <h2>Preisprognose</h2>
     <div class="pg-bar">${sideSeg}${viewSeg}</div>
-    <p class="pg-now">Jetzt <b>${price(now)}</b> <span class="mut">${side[1]}, Start: ${F.start}${F.sides.liveSide[side[0]] && Math.abs(F.sides.liveSide[side[0]] / now - 1) > .002 ? `, live ${price(F.sides.liveSide[side[0]])}` : ''}</span></p>
+    <p class="pg-now">Jetzt <b>${price(now)}</b> <span class="mut">${side[1]}, Grundlage: ${F.start}</span></p>
     <dl class="pg-tiles">${FCH.map(tile).join('')}</dl>
     ${fcChart(I, F, side)}
     <p class="note">Die Linie ist der mittlere Pfad (Median): Der echte Preis liegt mit gleicher Wahrscheinlichkeit darüber wie darunter. Das dunkle Band zeigt den wahrscheinlichen Bereich (50 % der Fälle), das helle den Bereich, in dem der Preis in 80 % der Fälle landet. „Fast sicher“ in den Kacheln ist dieser 80-%-Bereich.</p>
@@ -1053,13 +1055,13 @@ function fcChart(I, F, side){
     const d = E.daily(pts, {days: F.y.length, end: K.md ? K.md.days.to : E.dayStart(Date.now())}), v = E.hampel(d.v);
     hist.length = 0; for (let i = F.end - back + 1; i <= F.end; i++) if (num(v[i])) hist.push([i - F.end - 1, v[i]]);
   }
-  hist.push([0, fcPx(F, side, F.y0)]);
+  hist.push([0, fcNow(F, side)]);
   const q = s.q.slice(0, view).map(r => r.map(x => fcPx(F, side, x)));
   const all = hist.map(h => h[1]).concat(q.flatMap(r => [r[1], r[5]]));
   let lo = Math.min(...all), hi = Math.max(...all); const pad = (hi - lo) * .06 || hi * .05; lo = Math.max(0, lo - pad); hi += pad;
   const x0 = -back, x1 = view, X = d => padL + (d - x0) / (x1 - x0) * (W - padL - padR), Y = v => padT + (1 - (v - lo) / (hi - lo)) * (Hh - padT - padB);
   const band = (a, b) => `M${q.map((r, k) => `${X(k + 1).toFixed(1)},${Y(r[a]).toFixed(1)}`).join('L')}L${q.map((r, k) => `${X(k + 1).toFixed(1)},${Y(r[b]).toFixed(1)}`).reverse().join('L')}Z`;
-  const p0 = fcPx(F, side, F.y0);
+  const p0 = fcNow(F, side);
   const join = (a) => `M${X(0).toFixed(1)},${Y(p0).toFixed(1)}L` + band(a, a).slice(1).split('L').slice(0, q.length).join('L');
   const ticks = [lo + (hi - lo) * .1, lo + (hi - lo) * .5, lo + (hi - lo) * .9];
   const marks = FCH.filter(([h]) => h <= view).map(([h, l]) => `<line x1="${X(h)}" x2="${X(h)}" y1="${padT}" y2="${Hh - padB}" class="pg-mark"/>${X(h) - X(0) > 34 ? `<text x="${X(h)}" y="${Hh - 8}" class="pg-ax" text-anchor="middle">${h === 1 ? '24 h' : h + ' T'}</text>` : ''}`).join('');
@@ -1083,10 +1085,11 @@ function fcTargetHTML(I, F, side){
 function fcTargetResult(I, F, side){
   const raw = K.fcTarget; if (!raw) return '<p class="note">Zum Beispiel 250k, 1,5m oder 2b.</p>';
   const X = parseCoins(raw); if (!(X > 0)) return '<p class="note neg">Das ist keine gültige Zahl.</p>';
-  const now = fcPx(F, side, F.y0), tl = Math.log(X / side[2]);
+  const now = fcNow(F, side), tl = Math.log(X / side[2]);
   const T = Forecast.touch(F.sim, tl, F.intra.hi, F.cfg.cal && F.cfg.cal.tp);
   const ch = X / now - 1;
-  if (T.already) return `<p class="pg-ans">Der ${esc(side[1])} liegt mit ${price(now)} schon ${ch >= 0 ? 'über' : 'unter'} ${price(X)}.</p>`;
+  if (T.already) return `<p class="pg-ans">Der ${esc(side[1])} liegt mit ${price(now)} schon ${T.up ? 'über' : 'unter'} ${price(X)}.</p>`;
+  if ((X >= now) !== T.up) return `<p class="pg-ans">${price(X)} liegt zwischen dem aktuellen ${esc(side[1])} (${price(now)}) und seinem üblichen Abstand zum Marktpreis. Das ist praktisch der heutige Preis.</p>`;
   const P0 = d => T.cum[Math.min(d, F.sim.H) - 1];
   const when = T.t50 != null ? fcWhen(T.t50 + 1) : null;
   const range = T.t25 != null ? `Frühestens ${fcWhen(T.t25 + 1).replace(/^in etwa /, 'in ').replace(/^innerhalb von/, 'innerhalb von')}${T.t75 != null ? `, spätestens ${fcWhen(T.t75 + 1).replace(/^in etwa /, 'in ')}` : ''} (jeweils jede vierte Simulation).` : '';
