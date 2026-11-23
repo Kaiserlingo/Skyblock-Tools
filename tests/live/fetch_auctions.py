@@ -2,7 +2,7 @@
 import json, urllib.request, time, sys
 def get(u):
     with urllib.request.urlopen(u, timeout=30) as r: return json.load(r)
-for attempt in range(4):
+for attempt in range(10):   # Hypixel erneuert die Auktionen etwa jede Minute – dann neu laden
     p0 = get('https://api.hypixel.net/v2/skyblock/auctions?page=0')
     pages = [p0] + [get(f'https://api.hypixel.net/v2/skyblock/auctions?page={i}') for i in range(1, p0['totalPages'])]
     if len({p['lastUpdated'] for p in pages}) == 1: break
