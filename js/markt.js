@@ -940,7 +940,8 @@ function fcSides(I){
   }
   const px = pxOf(I.id), lb = px && px.b > 0 ? px.b : I.live && I.live.b;
   // Lowest BIN liegt meist etwas unter dem Ø Verkaufspreis; das heutige Verhältnis gilt als typisch (begrenzt)
-  const ratio = lb && A.p ? Math.min(Math.max(lb / A.p, .5), 2) : null;
+  // Liegt der Lowest BIN sehr weit weg (z. B. Pets: Ø über alle Rarities), passt die Umrechnung nicht – dann ohne diese Seite
+  const r0 = lb && A.p ? lb / A.p : null, ratio = r0 && r0 >= .4 && r0 <= 2.5 ? r0 : null;
   return {list: [['avg', 'Ø Verkaufspreis', 1]].concat(ratio ? [['lbin', 'Lowest BIN', ratio]] : []), live: null, liveSide: {avg: null, lbin: lb}};
 }
 // Streuung eines Momentpreises um das Tagesmittel und typischer Ausschlag innerhalb eines Tages (aus den 2-h-Punkten)
