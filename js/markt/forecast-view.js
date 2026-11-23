@@ -20,13 +20,24 @@ function fcSides(I){
     const q = S.products[I.id] && S.products[I.id].quick_status;
     const base = q ? E.bazaarPrice({buy: q.buyPrice, sell: q.sellPrice, buyMovingWeek: q.buyMovingWeek, sellMovingWeek: q.sellMovingWeek}) : null;
     const rb = r('buy') || (q && base ? q.buyPrice / base : 1), rs = r('sell') || (q && base ? q.sellPrice / base : 1);
-    return {list: [['buy', 'Instabuy', rb], ['sell', 'Instasell', rs], ['mid', 'Marktpreis', 1]], live: base, liveSide: {buy: q && q.buyPrice, sell: q && q.sellPrice, mid: base}};
+    return {list: [['buy', 'Instabuy', rb], ['sell', 'Instasell', rs], ['mid', 'Marktpreis', 1]], live: base, liveSide: {buy: q && q.buyPrice, sell: q && q.sellPrice, mid: base},
+      decay: {buy: fcDecay(pts, 'buy'), sell: fcDecay(pts, 'sell')}};
   }
   const px = pxOf(I.id), lb = px && px.b > 0 ? px.b : I.live && I.live.b;
   // Lowest BIN liegt meist etwas unter dem Ø Verkaufspreis; das heutige Verhältnis gilt als typisch (begrenzt)
   // Liegt der Lowest BIN sehr weit weg (z. B. Pets: Ø über alle Rarities), passt die Umrechnung nicht – dann ohne diese Seite
   const r0 = lb && A.p ? lb / A.p : null, ratio = r0 && r0 >= .4 && r0 <= 2.5 ? r0 : null;
   return {list: [['avg', 'Ø Verkaufspreis', 1]].concat(ratio ? [['lbin', 'Lowest BIN', ratio]] : []), live: null, liveSide: {avg: null, lbin: lb}};
+}
+// Wie schnell sich ein ungewöhnlicher Abstand einer Preisart zum Marktpreis abbaut: AR(1) der Abweichung, je Tag
+function fcDecay(pts, k){
+  const a = pts.filter(p => num(p[k]) && p[k] > 0); if (a.length < 24) return 0;
+  const g = a.map(p => Math.log(p[k] / p.v)), m = E.median(g), d = g.map(x => x - m);
+  let sxy = 0, sxx = 0; const dts = [];
+  for (let i = 1; i < a.length; i++){ const dt = a[i].t - a[i - 1].t; if (dt <= 0 || dt > 6 * 3600e3) continue; sxy += d[i] * d[i - 1]; sxx += d[i - 1] ** 2; dts.push(dt); }
+  if (sxx <= 0 || dts.length < 20) return 0;
+  const rho = Math.min(Math.max(sxy / sxx, 0), .98);
+  return Math.pow(rho, DAY / E.median(dts));
 }
 // Streuung eines Momentpreises um das Tagesmittel und typischer Ausschlag innerhalb eines Tages (aus den 2-h-Punkten)
 function fcIntraday(I){
@@ -111,11 +122,11 @@ function forecastHTML(I){
   const side = fcSide(I, F), s = F.sim;
   const now = fcNow(F, side);
   const tile = ([h, label]) => {
-    const q = s.q[h - 1], med = fcPx(F, side, q[3]);
-    return `<div class="pg-tile"><dt>${label} <span class="mut">${fcDate(F, h)}</span></dt><dd><b>${price(med)}</b> ${PC(med / now - 1)}</dd>
-      <dd class="pg-r"><span>wahrscheinlich</span> ${fmt(fcPx(F, side, q[2]))} bis ${fmt(fcPx(F, side, q[4]))}</dd>
-      <dd class="pg-r"><span>fast sicher</span> ${fmt(fcPx(F, side, q[1]))} bis ${fmt(fcPx(F, side, q[5]))}</dd>
-      <dd class="pg-r"><span>Chance, dass es mehr kostet</span> ${NF0.format(fcUp(F, side, h) * 100)} %</dd></div>`;
+    const d = fcDay(F, side, h);
+    return `<div class="pg-tile"><dt>${label} <span class="mut">${fcDate(F, h)}</span></dt><dd><b>${price(d.med)}</b> ${PC(d.ch)}</dd>
+      <dd class="pg-r"><span>wahrscheinlich</span> ${fmt(d.q25)} bis ${fmt(d.q75)}</dd>
+      <dd class="pg-r"><span>fast sicher</span> ${fmt(d.q10)} bis ${fmt(d.q90)}</dd>
+      <dd class="pg-r"><span>Chance, dass es mehr kostet</span> ${NF0.format(d.up * 100)} %</dd></div>`;
   };
   const sideSeg = F.sides.list.length > 1 ? `<div class="cp-group"><span class="cp-l">Preis</span><div class="seg sm" role="group" aria-label="Preisart">${F.sides.list.map(([k, l]) => `<button data-fcside="${k}" class="${side[0] === k ? 'on' : ''}">${l}</button>`).join('')}</div></div>` : '';
   const ymd = t => { const d = new Date(t); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };   // Ortszeit, wie das Datumsfeld
@@ -135,13 +146,19 @@ function forecastHTML(I){
 // Datum in h Tagen, kurz
 const fcDate = (F, h) => new Date(F.at + h * DAY).toLocaleDateString('de-AT', {weekday: 'short', day: 'numeric', month: 'short'});
 // Anteil der simulierten Pfade, die in h Tagen über dem heutigen Preis der Seite liegen
-function fcUp(F, side, h){ const s = F.sim, lim = Math.log(fcNow(F, side) / side[2]), k = h - 1; let c = 0; for (let p = 0; p < s.N; p++) if (s.paths[p * s.H + k] > lim) c++; return c / s.N; }
+function fcUp(F, side, h){ const s = F.sim, lim = Math.log(fcNow(F, side) / (side[2] * fcGap(F, side, h))), k = h - 1; let c = 0; for (let p = 0; p < s.N; p++) if (s.paths[p * s.H + k] > lim) c++; return c / s.N; }
+/* Abstand der Preisart: Liegt z. B. der Instabuy gerade weiter über dem Marktpreis als üblich, baut sich dieser Abstand
+   so schnell ab, wie er es bei diesem Item in den letzten 7 Tagen getan hat (2-h-Punkte). Faktor für Tag h, 1 = üblicher Abstand. */
+function fcGap(F, side, h){
+  const g = fcNow(F, side) / fcPx(F, side, F.y0) - 1, r = F.sides.decay && F.sides.decay[side[0]] || 0;
+  return 1 + g * Math.pow(r, h);
+}
 // Kennzahlen für Tag h (0 = jetzt)
 function fcDay(F, side, h){
   const now = fcNow(F, side);
   if (h <= 0) return {h: 0, t: F.at, med: now, q10: now, q25: now, q75: now, q90: now, ch: 0, up: null};
-  const q = F.sim.q[Math.min(h, F.sim.H) - 1], med = fcPx(F, side, q[3]);
-  return {h, t: F.at + h * DAY, med, q10: fcPx(F, side, q[1]), q25: fcPx(F, side, q[2]), q75: fcPx(F, side, q[4]), q90: fcPx(F, side, q[5]), ch: med / now - 1, up: fcUp(F, side, h)};
+  const q = F.sim.q[Math.min(h, F.sim.H) - 1], g = fcGap(F, side, h), px = i => fcPx(F, side, q[i]) * g, med = px(3);
+  return {h, t: F.at + h * DAY, med, q10: px(1), q25: px(2), q75: px(4), q90: px(5), ch: med / now - 1, up: fcUp(F, side, h)};
 }
 const fcRel = h => h === 0 ? 'jetzt' : h === 1 ? 'morgen' : `in ${h} Tagen`;
 
@@ -287,7 +304,7 @@ function fcDriversHTML(I, F, side){
      why: `Kleine Dauer-Bewegung aus dem ganzen Verlauf. Trends der letzten Wochen (${P(fit.trend.slope * 7)} pro Woche) werden nicht fortgeschrieben: In Rückwärtstests über alle Items sagten sie die Zukunft nicht voraus.`},
   ].map(d => { Object.assign(d, {c7: ch(d.a, d.b, 7), c31: ch(d.a, d.b, H)}); if (typeof d.why === 'function') d.why = d.why(d); return d; });
   if (Math.abs(gap) > .002) D.unshift({id: 'side', name: `${side[1]} weicht gerade ab`, c7: (1 + tot7) / (1 + b7) - 1, c31: (1 + tot31) / (1 + b31) - 1,
-    why: `Der ${esc(side[1])} liegt jetzt ${P(Math.abs(gap), false)} ${gap > 0 ? 'über' : 'unter'} seinem üblichen Abstand zum ${I.k.bz ? 'Marktpreis' : 'Ø Verkaufspreis'}. Die Prognose rechnet damit, dass sich dieser Abstand wieder normalisiert.`});
+    why: `Der ${esc(side[1])} liegt jetzt ${P(Math.abs(gap), false)} ${gap > 0 ? 'über' : 'unter'} seinem üblichen Abstand zum ${I.k.bz ? 'Marktpreis' : 'Ø Verkaufspreis'}. ${(() => { const r = F.sides.decay && F.sides.decay[side[0]] || 0, hl = r > 0 && r < 1 ? Math.LN2 / -Math.log(r) : 0; return hl ? `In den letzten 7 Tagen hat sich so ein Abstand bei diesem Item etwa zur Hälfte in ${hl < 1 ? NF0.format(hl * 24) + ' Stunden' : NF1.format(hl) + ' Tagen'} abgebaut; damit rechnet die Prognose.` : 'Die Prognose rechnet damit, dass sich dieser Abstand schnell wieder normalisiert.'; })()}`});
   const mx = Math.max(.005, ...D.map(d => Math.abs(d.c31)), ...D.map(d => Math.abs(d.c7)));
   const bar = v => `<span class="pg-bar2"><i class="${v >= 0 ? 'up' : 'dn'}" style="${v >= 0 ? 'left:50%' : `right:50%`};width:${(Math.min(Math.abs(v) / mx, 1) * 50).toFixed(1)}%"></i></span>`;
   const top = D.slice().sort((x, y) => Math.abs(y.c31) - Math.abs(x.c31))[0];
