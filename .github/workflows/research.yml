@@ -10,7 +10,7 @@ on:
         default: "600"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   dump:
@@ -22,8 +22,9 @@ jobs:
         with:
           node-version: 22
       - run: node tools/research_dump.mjs "${{ github.event.inputs.ah }}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: research
-          path: research.json.gz
-          retention-days: 7
+      - name: Auf Branch "research" ablegen
+        run: |
+          mkdir pub && mv research.json.gz pub/ && cd pub
+          git init -q -b research && git add research.json.gz
+          git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "Forschungsdaten"
+          git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" research
