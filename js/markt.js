@@ -989,6 +989,8 @@ function fcRun(I){
     const r = I.ah.sold.list.filter(x => x.t > now - DAY).map(x => x.p), m = r.length >= 3 ? E.median(r) : null;
     if (m && Math.abs(Math.log(m) - y[end]) < Math.log(1.35)){ y0 = Math.log(m); start = 'Verkäufe der letzten 24 h'; }
   }
+  // Lowest BIN: Verhältnis zum Startpreis, damit „jetzt“ genau der Live-Wert ist
+  if (I.k.ah){ const lb = sides.liveSide.lbin, r0 = lb ? lb / Math.exp(y0) : null; sides.list = sides.list.filter(x => x[0] !== 'lbin'); if (r0 && r0 >= .4 && r0 <= 2.5) sides.list.push(['lbin', 'Lowest BIN', r0]); }
   const fit = Forecast.fit(y, end, cfg.hp, cfg.prior);
   const my = fcMayor(I, now);
   const seed = fcSeed(I.id);
@@ -1024,12 +1026,14 @@ function forecastHTML(I){
   if (F.err) return card('Preisprognose', '', `<p class="note">${F.err}</p>`, true);
   const side = fcSide(I, F), s = F.sim, cfg = F.cfg;
   const now = fcNow(F, side);
+  // Chance auf Anstieg gegenüber dem angezeigten Preis
+  const upAt = k => { const lim = Math.log(now / side[2]); let c = 0; for (let p = 0; p < s.N; p++) if (s.paths[p * s.H + k] > lim) c++; return c / s.N; };
   const tile = ([h, label]) => {
     const q = s.q[h - 1], med = fcPx(F, side, q[3]);
     return `<div class="pg-tile"><dt>${label}</dt><dd><b>${price(med)}</b> ${PC(med / now - 1)}</dd>
       <dd class="pg-r"><span>wahrscheinlich</span> ${fmt(fcPx(F, side, q[2]))} bis ${fmt(fcPx(F, side, q[4]))}</dd>
       <dd class="pg-r"><span>fast sicher</span> ${fmt(fcPx(F, side, q[1]))} bis ${fmt(fcPx(F, side, q[5]))}</dd>
-      <dd class="pg-r"><span>Chance auf Anstieg</span> ${NF0.format(s.up[h - 1] * 100)} %</dd></div>`;
+      <dd class="pg-r"><span>Chance auf Anstieg</span> ${NF0.format(upAt(h - 1) * 100)} %</dd></div>`;
   };
   const sideSeg = F.sides.list.length > 1 ? `<div class="seg sm" role="group" aria-label="Preisart">${F.sides.list.map(([k, l]) => `<button data-fcside="${k}" class="${side[0] === k ? 'on' : ''}">${l}</button>`).join('')}</div>` : '';
   const viewSeg = `<div class="seg sm" role="group" aria-label="Zeitraum">${[31, 90, 180].map(d => `<button data-fcview="${d}" class="${(K.fcView || 31) === d ? 'on' : ''}">${d} Tage</button>`).join('')}</div>`;
