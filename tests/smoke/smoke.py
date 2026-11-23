@@ -89,6 +89,8 @@ async def main():
             await pg.wait_for_timeout(2500)
             txt = await pg.inner_text('#view')
             bad = [w for w in ['NaN','undefined','Infinity','[object'] if w in txt]
+            import re as _re
+            if _re.search(r'\s[\w-]+="[^"]*(NaN|Infinity|undefined)[^"]*"', await pg.inner_html('#view')): bad.append('SVG/Attribut mit NaN')
             print(h or 'hub', len(txt), 'BAD:'+','.join(bad) if bad else 'ok', '|', txt[:110].replace('\n',' / '))
             if bad: PROBLEMS.append(f'{h or "Start"}: {bad}')
             await pg.screenshot(path=f"{OUT}/{os.environ.get('CS','light')}_{(h or 'hub').replace('#','').replace('/','_')}.png", full_page=True)

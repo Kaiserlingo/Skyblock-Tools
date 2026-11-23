@@ -26,6 +26,8 @@ window.siteAudit = async function(opt = {}){
       const i = t.indexOf(w);
       chk('Text ohne kaputte Werte', i < 0, `${where}: „${w}“`, i >= 0 ? t.slice(Math.max(0, i - 70), i + 40) : null);
     }
+    const html = (document.querySelector('#view') || document.body).innerHTML, a = html.match(/\s[\w-]+="[^"]*(NaN|Infinity|undefined)[^"]*"/);
+    chk('Grafiken ohne kaputte Werte (SVG-Attribute)', !a, where, a ? html.slice(Math.max(0, a.index - 120), a.index + 60) : null);
   };
   const N = s => s == null ? s : String(s).replace(/\s+/g, ' ').trim();   // Leerzeichen vereinheitlichen (price() trennt Tausender mit festem Leerzeichen)
   const dl = root => { const m = {}; (root ? root.querySelectorAll('dt') : []).forEach(dt => { const dd = dt.nextElementSibling; if (dd) m[dt.textContent.trim()] = N(dd.textContent); }); return m; };

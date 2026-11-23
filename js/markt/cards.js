@@ -23,7 +23,9 @@ function curveSVG(b){
   const W = 520, H = 220, L = 54, R = 10, T = 10, B = 28;
   const dem = b.demand, sup = b.supply; if (!dem.length && !sup.length) return '<p class="note">Orderbuch leer.</p>';
   const mid = b.mid, keep = l => l.p >= mid * .7 && l.p <= mid * 1.3;
-  const d = dem.filter(keep), s = sup.filter(keep);
+  let d = dem.filter(keep), s = sup.filter(keep);
+  // sehr weiter Spread: keine Stufe liegt nahe der Mitte – dann die besten Stufen beider Seiten zeigen
+  if (!d.length && !s.length){ d = dem.slice(0, 10); s = sup.slice(0, 10); }
   const qmax = Math.max(1, ...d.map(l => l.q), ...s.map(l => l.q)), ps = [...d, ...s].map(l => l.p);
   let pmin = Math.min(...ps), pmax = Math.max(...ps); if (pmin === pmax){ pmin *= .99; pmax *= 1.01; }
   const X = q => L + q / qmax * (W - L - R), Y = p => T + (1 - (p - pmin) / (pmax - pmin)) * (H - T - B);

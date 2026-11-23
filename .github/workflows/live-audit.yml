@@ -58,7 +58,7 @@ jobs:
         run: |
           set -x
           ls -la audit
-          cd audit && (echo "Live-Prüfung $(date -u)"; for f in oberflaeche daten flipper lbin; do echo; echo "=== $f ==="; tail -60 $f.txt 2>/dev/null; done) > bericht.txt
+          cd audit && (echo "Live-Prüfung $(date -u)"; for f in oberflaeche daten flipper lbin; do echo; echo "=== $f ==="; tail -60 $f.txt 2>/dev/null || echo "(kein Ergebnis)"; done) > bericht.txt
           git init -q -b audit && git add -A
           git -c user.name="github-actions" -c user.email="github-actions@users.noreply.github.com" commit -q -m "Live-Prüfung"
           git push -f "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git" audit

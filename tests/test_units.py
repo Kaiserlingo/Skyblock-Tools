@@ -115,6 +115,9 @@ async def main():
            const tests=[{t:[]},{t:[1],hi:[5],lo:[4]},{t:[1,2,3],hi:[null,null,null],lo:[null,null,null]},{t:[1,2,3],hi:[5,5,5],lo:[5,5,5]},{t:[1,2,1e12],hi:[1,NaN,3],lo:[0.5,1,2]},{t:[1,2],hi:[889630,889630.0000000003],lo:[null,null]},{t:[1,2],hi:[1e15,1e15+0.2],lo:[0,0]}];   // fast gleiche Werte: früher Endlosschleife im Raster
            const r=[];for(const d of tests){try{const t0=performance.now();c.setData(d);c.view=[0,3];c.draw();if(performance.now()-t0>500)throw new Error('zu langsam');c.setIndicators({sma:20,ema:50,bb:true});c.draw();r.push('ok')}catch(e){r.push(String(e))}}c.destroy();el.remove();return r})()""")
         ok(all(x=='ok' for x in out), f"Chart mit kaputten Daten: {out}")
+        # Orderbuch-Kurve bei sehr weitem Spread (keine Stufe nahe der Mitte): früher NaN in den SVG-Koordinaten
+        svg=await E("""curveSVG(Econ.book({sell_summary:[{amount:5,pricePerUnit:1,orders:1}],buy_summary:[{amount:3,pricePerUnit:1000,orders:1},{amount:9,pricePerUnit:5000,orders:2}]}))""")
+        ok('NaN' not in svg and 'Infinity' not in svg, f"Orderbuch-Kurve mit weitem Spread: {svg[:200]}")
         ok(not errs, f"JS-Fehler: {errs}")
         await b.close()
     print(f"bestanden: {passed[0]}, Fehler: {len(fails)}"); [print("  ✗",f) for f in fails]

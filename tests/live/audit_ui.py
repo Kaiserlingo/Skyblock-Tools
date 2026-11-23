@@ -14,7 +14,7 @@ async def main(out, n):
         pg = await b.new_page(viewport={'width': 1300, 'height': 900})
         errs = []
         pg.on('pageerror', lambda e: errs.append(str(e)))
-        pg.on('console', lambda m: errs.append('console: ' + m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
+        pg.on('console', lambda m: errs.append(f'console ({pg.url.split("#")[-1]}): ' + m.text) if m.type == 'error' and 'Failed to load resource' not in m.text else None)
         await pg.goto(BASE + '#bazaar/market')
         await pg.wait_for_timeout(3000)
         await pg.add_script_tag(path=os.path.join(os.path.dirname(__file__), 'audit_page.js'))
